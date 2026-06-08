@@ -1,0 +1,33 @@
+# Documents & Notes (Theo yêu cầu)
+docs/
+implementation_v1/
+*.png
+*.jpg
+*.jpeg
+*.md
+
+# Environments
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# Frontend (React/Vite)
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
