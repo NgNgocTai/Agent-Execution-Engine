@@ -42,6 +42,14 @@ def _get_provider(name: str) -> LLMProvider:
     return cls()
 
 
+AVAILABLE_PROVIDERS = ["openai", "anthropic"]
+
+
+@router.get("/config")
+async def config():
+    return {"providers": AVAILABLE_PROVIDERS}
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest):
     if engine is None:
