@@ -1,14 +1,32 @@
-import random
+import logging
 
-from data.mock_inventory import MOCK_NE_INVENTORY
+import paramiko
+
+from core.config import settings
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
 
+logger = logging.getLogger(__name__)
 
-MOCK_METRICS: dict[str, dict] = {
-    "10.211.140.16": {"mem_pct": 91.2, "cpu_pct": 88.0, "load1": 12.5, "disk_pct": 65.0},
-    "10.211.140.17": {"mem_pct": 45.0, "cpu_pct": 30.0, "load1": 2.1, "disk_pct": 40.0},
-    "10.211.140.1":  {"mem_pct": 78.0, "cpu_pct": 82.0, "load1": 8.3, "disk_pct": 55.0},
-}
+METRICS_SCRIPT = (
+    "python3 -c '"
+    "import json,os;"
+    "f=open(\"/proc/meminfo\");"
+    "lines=f.readlines();f.close();"
+    "mem_total=int(lines[0].split()[1]);"
+    "mem_avail=int(lines[2].split()[1]);"
+    "mem_pct=round((1-mem_avail/mem_total)*100,1);"
+    "f=open(\"/proc/loadavg\");"
+    "load1=float(f.read().split()[0]);f.close();"
+    "st=os.statvfs(\"/\");"
+    "disk_pct=round((1-st.f_bavail/st.f_blocks)*100,1);"
+    "f=open(\"/proc/stat\");"
+    "parts=f.readline().split();f.close();"
+    "idle=int(parts[4]);"
+    "total=sum(int(p) for p in parts[1:]);"
+    "cpu_pct=round((1-idle/total)*100,1);"
+    "print(json.dumps({\"mem_pct\":mem_pct,\"cpu_pct\":cpu_pct,\"load1\":load1,\"disk_pct\":disk_pct}))"
+    "'"
+)
 
 
 class NodeHealthRemediateSkill(BaseSkill):
@@ -48,19 +66,43 @@ class NodeHealthRemediateSkill(BaseSkill):
                     "description": "Tên container docker (cần cho nhánh đọc log & restart service)",
                     "default": "",
                 },
-                "user": {
-                    "type": "string",
-                    "description": "User SSH",
-                    "default": "noc",
-                },
-                "password": {
-                    "type": "string",
-                    "description": "Mật khẩu SSH (nên dùng env SSH_PASSWORD)",
-                    "default": "",
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "True = chỉ in lệnh, False = thực thi. Mặc định True.",
+                    "default": True,
                 },
             },
             "required": ["host", "ram_threshold", "cpu_threshold"],
         }
+
+    def _ssh_exec(self, host: str, command: str) -> tuple[int, str]:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(
+                hostname=host,
+                port=settings.ssh_port,
+                username=settings.ssh_user,
+                password=settings.ssh_password,
+                timeout=10,
+                look_for_keys=False,
+                allow_agent=False,
+            )
+            _, stdout, stderr = client.exec_command(command, timeout=15)
+            exit_code = stdout.channel.recv_exit_status()
+            output = stdout.read().decode("utf-8", errors="replace").strip()
+            err = stderr.read().decode("utf-8", errors="replace").strip()
+            if err:
+                logger.warning("SSH stderr [%s]: %s", host, err)
+            return exit_code, output
+        finally:
+            client.close()
+
+    def _get_metrics(self, host: str) -> dict:
+        import json
+
+        _, output = self._ssh_exec(host, METRICS_SCRIPT)
+        return json.loads(output)
 
     async def execute(
         self,
@@ -68,26 +110,29 @@ class NodeHealthRemediateSkill(BaseSkill):
         ram_threshold: int,
         cpu_threshold: int,
         service: str = "",
-        user: str = "noc",
-        password: str = "",
+        dry_run: bool = True,
         **kwargs,
     ) -> SkillResult:
-        inventory = MOCK_NE_INVENTORY.get(host)
-        if not inventory:
+        try:
+            metrics = self._get_metrics(host)
+        except paramiko.AuthenticationException:
             return SkillResult(
-                status=SkillStatus.BUSINESS_ERROR,
+                status=SkillStatus.SYSTEM_ERROR,
                 data=None,
-                error=f"Node '{host}' không tồn tại trong inventory. Các node có sẵn: {list(MOCK_NE_INVENTORY.keys())}",
+                error=f"SSH authentication failed for {host}. Check SSH_USER/SSH_PASSWORD.",
             )
-
-        metrics = MOCK_METRICS.get(host)
-        if not metrics:
-            metrics = {
-                "mem_pct": round(random.uniform(20, 95), 1),
-                "cpu_pct": round(random.uniform(10, 90), 1),
-                "load1": round(random.uniform(0.5, 15), 1),
-                "disk_pct": round(random.uniform(30, 80), 1),
-            }
+        except paramiko.SSHException as e:
+            return SkillResult(
+                status=SkillStatus.SYSTEM_ERROR,
+                data=None,
+                error=f"SSH error connecting to {host}: {e}",
+            )
+        except Exception as e:
+            return SkillResult(
+                status=SkillStatus.SYSTEM_ERROR,
+                data=None,
+                error=f"Failed to get metrics from {host}: {e}",
+            )
 
         ram_high = metrics["mem_pct"] > ram_threshold
         cpu_high = metrics["cpu_pct"] > cpu_threshold
@@ -96,14 +141,37 @@ class NodeHealthRemediateSkill(BaseSkill):
             action = "restart_docker"
             command = "sudo -n systemctl restart docker"
         elif ram_high and not cpu_high:
+            if not service:
+                return SkillResult(
+                    status=SkillStatus.BUSINESS_ERROR,
+                    data=None,
+                    error="Action 'read_logs' requires 'service' parameter (docker container name). Please ask the user.",
+                )
             action = "read_logs"
-            command = f"docker logs --timestamps --tail 200 {service}" if service else None
+            command = f"docker logs --timestamps --tail 200 {service}"
         elif not ram_high and cpu_high:
+            if not service:
+                return SkillResult(
+                    status=SkillStatus.BUSINESS_ERROR,
+                    data=None,
+                    error="Action 'restart_service' requires 'service' parameter (docker container name). Please ask the user.",
+                )
             action = "restart_service"
-            command = f"docker restart {service}" if service else None
+            command = f"docker restart {service}"
         else:
             action = "none"
             command = None
+
+        executed = False
+        execution_output = None
+
+        if command and not dry_run:
+            try:
+                exit_code, output = self._ssh_exec(host, command)
+                executed = True
+                execution_output = output
+            except Exception as e:
+                execution_output = f"Error executing command: {e}"
 
         evaluation = {
             "ram_high": ram_high,
@@ -112,14 +180,16 @@ class NodeHealthRemediateSkill(BaseSkill):
             "cpu_threshold": cpu_threshold,
         }
 
-        result_data = {
-            "host": host,
-            "inventory": inventory,
-            "metrics": metrics,
-            "evaluation": evaluation,
-            "action": action,
-            "command": command,
-            "executed": False,
-        }
-
-        return SkillResult(status=SkillStatus.SUCCESS, data=result_data)
+        return SkillResult(
+            status=SkillStatus.SUCCESS,
+            data={
+                "host": host,
+                "metrics": metrics,
+                "evaluation": evaluation,
+                "action": action,
+                "command": command,
+                "dry_run": dry_run,
+                "executed": executed,
+                "execution_output": execution_output,
+            },
+        )
