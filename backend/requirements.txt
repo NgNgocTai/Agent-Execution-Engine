@@ -14,7 +14,12 @@ langfuse>=2.30.0,<3.0.0
 # SSH
 paramiko>=3.4.0,<4.0.0
 
-# Database (for future real integration)
+# Database (ORM + Migrations)
+sqlalchemy>=2.0.0,<3.0.0
+alembic>=1.13.0,<2.0.0
+aiosqlite>=0.20.0,<1.0.0
+
+# Database (future real integration)
 clickhouse-connect>=0.7.0,<1.0.0
 asyncpg>=0.29.0,<1.0.0
 
