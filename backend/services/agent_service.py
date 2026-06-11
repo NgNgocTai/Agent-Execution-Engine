@@ -91,7 +91,11 @@ class AgentEngine:
             return
 
         total_duration_ms = (time.monotonic() - start_time) * 1000
+
+        updated_messages = messages[1:]
+
         yield emitter.final_answer(
             total_tool_calls=total_tool_calls,
             total_duration_ms=total_duration_ms,
+            updated_messages=updated_messages,
         )

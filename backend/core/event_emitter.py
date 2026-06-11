@@ -70,12 +70,14 @@ class EventEmitter:
         self,
         total_tool_calls: int,
         total_duration_ms: float,
+        updated_messages: list[dict],
     ) -> AgentEvent:
         return AgentEvent(
             type=AgentEventType.FINAL_ANSWER,
             data={
                 "total_tool_calls": total_tool_calls,
                 "total_duration_ms": total_duration_ms,
+                "updated_messages": updated_messages,
             },
             session_id=self.session_id,
         )
