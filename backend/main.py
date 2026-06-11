@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from controllers.chat import router as chat_router, set_engine
+from repositories.engine import init_db
 from services.agent_service import AgentEngine
 from services.skills.noc_alarm_enrichment import NocAlarmEnrichmentSkill
 from services.skills.node_health_remediate import NodeHealthRemediateSkill
@@ -26,6 +27,9 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    await init_db()
+    logger.info("Database initialized")
+
     registry = SkillRegistry()
     registry.register(NocAlarmEnrichmentSkill())
     registry.register(NodeHealthRemediateSkill())
