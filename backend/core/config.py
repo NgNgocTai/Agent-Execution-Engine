@@ -10,10 +10,22 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
+    ssh_host: str = ""
     ssh_user: str = ""
     ssh_password: str = ""
     ssh_key_path: str = ""
     ssh_port: int = 22
+    clickhouse_host: str = ""
+    clickhouse_port: int = 8123
+    clickhouse_user: str = ""
+    clickhouse_password: str = ""
+    clickhouse_schema: str = ""
+    postgres_host: str = ""
+    postgres_port: int = 5432
+    postgres_user: str = ""
+    postgres_password: str = ""
+    postgres_db: str = ""
+    cors_origins: str = "*"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
