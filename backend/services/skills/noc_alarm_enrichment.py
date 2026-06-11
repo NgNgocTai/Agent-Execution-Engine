@@ -1,12 +1,16 @@
+import logging
 import re
-from datetime import datetime, timedelta
 
-from data.mock_alarms import MOCK_ALARMS
-from data.mock_inventory import MOCK_NE_INVENTORY
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
+
+logger = logging.getLogger(__name__)
 
 
 class NocAlarmEnrichmentSkill(BaseSkill):
+    def __init__(self, alarm_repo=None, device_repo=None) -> None:
+        self.alarm_repo = alarm_repo
+        self.device_repo = device_repo
+
     @property
     def name(self) -> str:
         return "noc_alarm_enrichment"
@@ -16,8 +20,8 @@ class NocAlarmEnrichmentSkill(BaseSkill):
         return (
             "Điều tra và làm giàu cảnh báo NOC: lấy cảnh báo theo loại alarm_type "
             "trong cửa sổ thời gian window_min phút, trích xuất entity (IP, tên NE, "
-            "interface, cell, AS) từ content, tra cứu inventory để lấy site_id, "
-            "segment, vendor, oncall_team."
+            "interface, cell, AS) từ content, tra cứu inventory để lấy vendor, "
+            "station_name, device_type."
         )
 
     @property
@@ -27,7 +31,7 @@ class NocAlarmEnrichmentSkill(BaseSkill):
             "properties": {
                 "alarm_type": {
                     "type": "string",
-                    "description": "Loại cảnh báo cần điều tra (vd: LINK_DOWN, BGP_SESSION_DOWN)",
+                    "description": "Loại cảnh báo cần điều tra (vd: LINK_DOWN, BGP_SESSION_DOWN, HIGH_CPU)",
                 },
                 "window_min": {
                     "type": "integer",
@@ -39,35 +43,64 @@ class NocAlarmEnrichmentSkill(BaseSkill):
         }
 
     async def execute(self, alarm_type: str, window_min: int = 10, **kwargs) -> SkillResult:
-        alarms = MOCK_ALARMS.get(alarm_type, [])
+        error_info = await self.device_repo.get_error_by_name(alarm_type)
+        if not error_info:
+            return SkillResult(
+                status=SkillStatus.BUSINESS_ERROR,
+                data=None,
+                error=f"Không tìm thấy loại lỗi '{alarm_type}' trong danh mục.",
+            )
+
+        error_code = error_info["error_code"]
+
+        alarms = self.alarm_repo.get_alarms(error_code, window_min)
         if not alarms:
             return SkillResult(
                 status=SkillStatus.BUSINESS_ERROR,
                 data=None,
-                error=f"Không tìm thấy cảnh báo loại '{alarm_type}'. Các loại có sẵn: {list(MOCK_ALARMS.keys())}",
+                error=f"Không có cảnh báo '{alarm_type}' trong {window_min} phút qua.",
             )
 
         enriched = []
         for alarm in alarms:
-            extracted = self._extract_entities(alarm.get("content", ""))
-            lookup_keys = extracted.get("ips", []) + extracted.get("ne_names", [])
-            enrichment = self._lookup_inventory(lookup_keys)
+            content = alarm.get("raw_log", "") or alarm.get("description", "")
+            extracted = self._extract_entities(content)
+
+            lookup_keys = list(set(extracted.get("ips", []) + extracted.get("ne_names", [])))
+            enrichment = []
+            if lookup_keys and self.device_repo:
+                devices = await self.device_repo.get_devices_by_names(lookup_keys)
+                for d in devices:
+                    enrichment.append({
+                        "device_name": d["name"],
+                        "ip_address": d["ip_address"],
+                        "device_type": d["device_type"],
+                        "vendor": d["vendor_name"],
+                        "station": d["station_name"],
+                    })
 
             enriched.append({
-                "alarm_id": alarm.get("alarm_id"),
-                "alarm_type": alarm.get("alarm_type"),
-                "ne_name": alarm.get("ne_name"),
-                "content": alarm.get("content"),
-                "severity": alarm.get("severity"),
-                "event_time": alarm.get("event_time"),
+                "alarm_id": alarm["alarm_id"],
+                "error_name": alarm_type,
+                "device_id": alarm["device_id"],
+                "raw_log": content,
+                "severity": alarm["severity"],
+                "status": alarm["status"],
+                "time_created": alarm["time_created"],
+                "time_solved": alarm.get("time_solved"),
                 "extracted": extracted,
-                "lookup_keys": lookup_keys,
                 "enrichment": enrichment,
             })
 
         return SkillResult(
             status=SkillStatus.SUCCESS,
-            data={"alarms": enriched, "total": len(enriched), "alarm_type": alarm_type, "window_min": window_min},
+            data={
+                "alarms": enriched,
+                "total": len(enriched),
+                "alarm_type": alarm_type,
+                "error_info": error_info,
+                "window_min": window_min,
+            },
         )
 
     @staticmethod
@@ -79,18 +112,9 @@ class NocAlarmEnrichmentSkill(BaseSkill):
         as_numbers = re.findall(r"\bAS(\d+)\b", content)
 
         return {
-            "ips": ips,
-            "ne_names": ne_names,
-            "interfaces": interfaces,
-            "cell_ids": cell_ids,
+            "ips": list(set(ips)),
+            "ne_names": list(set(ne_names)),
+            "interfaces": list(set(interfaces)),
+            "cell_ids": list(set(cell_ids)),
             "as_numbers": [f"AS{n}" for n in as_numbers],
         }
-
-    @staticmethod
-    def _lookup_inventory(keys: list[str]) -> list[dict]:
-        results = []
-        for key in keys:
-            entry = MOCK_NE_INVENTORY.get(key)
-            if entry:
-                results.append({"lookup_key": key, **entry})
-        return results

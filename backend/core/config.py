@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     clickhouse_user: str = ""
     clickhouse_password: str = ""
     clickhouse_schema: str = ""
+    clickhouse_database: str = "alarm_data"
     postgres_host: str = ""
     postgres_port: int = 5432
     postgres_user: str = ""
