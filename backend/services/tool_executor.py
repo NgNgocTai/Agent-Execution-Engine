@@ -2,7 +2,8 @@ import asyncio
 import logging
 import time
 
-from services.skills.base import BaseSkill, SkillRegistry, SkillResult, SkillStatus
+from services.skills.base import BaseSkill, SkillResult, SkillStatus
+from services.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 

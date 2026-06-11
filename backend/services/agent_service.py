@@ -8,7 +8,7 @@ from core.schemas import AgentEvent, AgentEventType, NormalizedToolCall
 from services.history import build_messages
 from services.prompts import get_system_prompt
 from services.providers.base import LLMProvider
-from services.skills.base import SkillRegistry
+from services.skills.registry import SkillRegistry
 from services.tool_executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
