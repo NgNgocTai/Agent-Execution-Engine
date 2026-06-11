@@ -2,7 +2,7 @@ import json
 import logging
 from typing import AsyncGenerator
 
-from openai import AsyncOpenAI
+import httpx
 
 from core.config import settings
 from core.schemas import NormalizedResponse, NormalizedToolCall
@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 class OpenAIProvider(LLMProvider):
     def __init__(self) -> None:
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self.api_key = settings.openai_api_key
+        self.base_url = settings.openai_base_url.rstrip("/")
+        self.model = settings.openai_model
 
     def format_tools(self, tools: list[ToolSchema]) -> list[dict]:
         return [
@@ -66,62 +68,63 @@ class OpenAIProvider(LLMProvider):
         tools: list[dict],
         stream: bool = True,
     ) -> AsyncGenerator[NormalizedResponse, None]:
-        response = await self.client.chat.completions.create(
-            model=settings.openai_model,
-            messages=messages,
-            tools=tools if tools else None,
-            stream=True,
-        )
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = tools
 
-        tool_call_buffers: dict[int, dict] = {}
-
-        async for chunk in response:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta is None:
-                continue
-
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tool_call_buffers:
-                        tool_call_buffers[idx] = {
-                            "id": tc_delta.id or "",
-                            "name": tc_delta.function.name if tc_delta.function else "",
-                            "arguments_str": "",
-                        }
-                        if tc_delta.function and tc_delta.function.name:
-                            yield NormalizedResponse(
-                                tool_calls=[
-                                    NormalizedToolCall(
-                                        call_id=tc_delta.id or "",
-                                        tool_name=tc_delta.function.name,
-                                        arguments={},
-                                    )
-                                ],
-                                stop_reason="tool_calls",
-                            )
-
-                    if tc_delta.function and tc_delta.function.arguments:
-                        tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
-
-            if delta.content:
-                yield NormalizedResponse(
-                    text_content=delta.content,
-                    stop_reason="",
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
                 )
+                data = response.json()
+        except Exception as e:
+            logger.error("LLM API error: %s", e)
+            yield NormalizedResponse(
+                text_content=f"Loi ket noi LLM: {e}",
+                stop_reason="end_turn",
+            )
+            return
 
-            finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
-            if finish_reason == "tool_calls":
-                yield NormalizedResponse(
-                    tool_calls=[
-                        NormalizedToolCall(
-                            call_id=buf["id"],
-                            tool_name=buf["name"],
-                            arguments=json.loads(buf["arguments_str"]) if buf["arguments_str"] else {},
-                        )
-                        for buf in tool_call_buffers.values()
-                    ],
-                    stop_reason="tool_calls",
-                )
-            elif finish_reason == "stop":
-                yield NormalizedResponse(stop_reason="end_turn")
+        if "error" in data:
+            err = data["error"]
+            logger.error("LLM API error: %s", err)
+            yield NormalizedResponse(
+                text_content=f"Loi LLM: {err.get('message', err)}",
+                stop_reason="end_turn",
+            )
+            return
+
+        choice = data["choices"][0]
+        message = choice["message"]
+
+        if message.get("tool_calls"):
+            yield NormalizedResponse(
+                tool_calls=[
+                    NormalizedToolCall(
+                        call_id=tc["id"],
+                        tool_name=tc["function"]["name"],
+                        arguments=json.loads(tc["function"]["arguments"]) if tc["function"]["arguments"] else {},
+                    )
+                    for tc in message["tool_calls"]
+                ],
+                stop_reason="tool_calls",
+            )
+
+        if message.get("content"):
+            yield NormalizedResponse(
+                text_content=message["content"],
+                stop_reason="end_turn",
+            )
+
+        if choice.get("finish_reason") == "stop" and not message.get("tool_calls"):
+            yield NormalizedResponse(stop_reason="end_turn")
