@@ -76,7 +76,16 @@ async def chat(req: ChatRequest):
 
                 if event.type == "final_answer":
                     updated = event.data.get("updated_messages", [])
-                    for msg in updated:
+
+                    if updated and updated[0]["role"] == "user":
+                        messages_to_save = updated[1:]
+                    else:
+                        logger.warning(
+                            "updated_messages[0] is not user message, saving all"
+                        )
+                        messages_to_save = updated
+
+                    for msg in messages_to_save:
                         await repo.add_message(
                             conversation.id,
                             role=msg["role"],
