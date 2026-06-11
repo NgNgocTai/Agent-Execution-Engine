@@ -8,7 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    openai_base_url: str = "https://api.bluesminds.com/v1"
+    openai_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     database_url: str = "sqlite+aiosqlite:///./conversations.db"
