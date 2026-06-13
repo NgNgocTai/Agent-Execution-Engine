@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import type { AgentEvent, ChatMessage, ToolCallCard, ThinkingBlock } from "../types";
-import { sendMessage } from "../lib/api";
+import { sendMessage, getConversationMessages } from "../lib/api";
 import { useSSE } from "./useSSE";
 
 interface SessionEntry {
@@ -211,6 +211,79 @@ export function useChat() {
     );
   }, []);
 
+  const loadConversation = useCallback(
+    async (cid: string) => {
+      cancel();
+      setIsStreaming(false);
+
+      try {
+        const data = await getConversationMessages(cid);
+        const loaded: ChatMessage[] = [];
+
+        for (const msg of data.messages) {
+          if (msg.role === "user") {
+            loaded.push({
+              role: "user",
+              content: msg.content || "",
+              thinkingBlocks: [],
+              toolCallCards: [],
+              textContent: "",
+              isStreaming: false,
+              timestamp: "",
+            });
+          } else if (msg.role === "assistant" && msg.tool_calls) {
+            loaded.push({
+              role: "assistant",
+              content: "",
+              thinkingBlocks: [],
+              toolCallCards: msg.tool_calls.map((tc) => ({
+                callId: tc.id,
+                toolName: tc.function.name,
+                arguments: JSON.parse(tc.function.arguments || "{}"),
+                status: "success" as const,
+                result: null,
+                error: null,
+                executionTimeMs: 0,
+                showInput: true,
+              })),
+              textContent: "",
+              isStreaming: false,
+              timestamp: "",
+            });
+          } else if (msg.role === "tool") {
+            const lastAssistant = [...loaded].reverse().find((m) => m.role === "assistant");
+            if (lastAssistant) {
+              const lastCard = lastAssistant.toolCallCards[lastAssistant.toolCallCards.length - 1];
+              if (lastCard) {
+                try {
+                  lastCard.result = JSON.parse(msg.content || "{}");
+                } catch {
+                  lastCard.result = msg.content || null;
+                }
+              }
+            }
+          } else if (msg.role === "assistant" && msg.content) {
+            loaded.push({
+              role: "assistant",
+              content: "",
+              thinkingBlocks: [],
+              toolCallCards: [],
+              textContent: msg.content,
+              isStreaming: false,
+              timestamp: "",
+            });
+          }
+        }
+
+        setMessages(loaded);
+        setConversationId(cid);
+      } catch (err) {
+        console.error("Failed to load conversation:", err);
+      }
+    },
+    [cancel],
+  );
+
   const switchProvider = useCallback(
     (provider: string) => {
       setCurrentProvider(provider);
@@ -229,5 +302,6 @@ export function useChat() {
     newChat,
     switchProvider,
     toggleTab,
+    loadConversation,
   };
 }
