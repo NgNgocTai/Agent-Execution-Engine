@@ -32,6 +32,13 @@ export async function getConversations(): Promise<ConversationEntry[]> {
   return data.conversations || [];
 }
 
+export async function deleteConversation(conversationId: string): Promise<boolean> {
+  const data = await fetch(`${API_BASE}/conversations/${conversationId}`, {
+    method: "DELETE",
+  }).then((r) => r.json());
+  return data.success;
+}
+
 export interface ConversationMessages {
   conversation_id: string;
   provider: string;
