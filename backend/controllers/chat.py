@@ -73,6 +73,16 @@ async def list_conversations():
         return {"conversations": conversations}
 
 
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    async with async_session() as session:
+        repo = ConversationRepository(session)
+        success = await repo.delete(conversation_id)
+        if not success:
+            return {"error": "Conversation not found"}
+        return {"success": True}
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest):
     if engine is None:
@@ -108,13 +118,10 @@ async def chat(req: ChatRequest):
                 if event.type == "final_answer":
                     updated = event.data.get("updated_messages", [])
 
-                    if updated and updated[0]["role"] == "user":
-                        messages_to_save = updated[1:]
-                    else:
-                        logger.warning(
-                            "updated_messages[0] is not user message, saving all"
-                        )
-                        messages_to_save = updated
+                    # `updated` chứa: [toàn bộ history] + [user_message] + [các message mới tạo ra (assistant, tool)]
+                    # Ta chỉ cần lưu các message mới tạo ra
+                    num_existing = len(history) + 1
+                    messages_to_save = updated[num_existing:]
 
                     for msg in messages_to_save:
                         await repo.add_message(

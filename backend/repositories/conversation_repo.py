@@ -85,3 +85,19 @@ class ConversationRepository:
                 "created_at": str(conv.created_at),
             })
         return conversations
+
+    async def delete(self, conversation_id: str) -> bool:
+        from sqlalchemy import delete
+        
+        # Delete messages first due to foreign key
+        await self.session.execute(
+            delete(Message).where(Message.conversation_id == conversation_id)
+        )
+        
+        # Delete conversation
+        result = await self.session.execute(
+            delete(Conversation).where(Conversation.id == conversation_id)
+        )
+        
+        await self.session.commit()
+        return result.rowcount > 0
