@@ -5,18 +5,19 @@ import TextResponse from "./TextResponse";
 
 interface Props {
   message: ChatMessage;
+  messageIndex: number;
   onToggleTab?: (callId: string, showInput: boolean) => void;
 }
 
-export default function ReasoningTrace({ message, onToggleTab }: Props) {
+export default function ReasoningTrace({ message, messageIndex, onToggleTab }: Props) {
   return (
     <div className="bg-white border border-[#e2e2e2] rounded-2xl rounded-tl-none px-6 py-5 w-full shadow-sm space-y-4">
       {message.thinkingBlocks.length > 0 && (
         <ThinkingBlock blocks={message.thinkingBlocks} />
       )}
 
-      {message.toolCallCards.map((card) => (
-        <ToolCallCard key={card.callId} card={card} onToggleTab={onToggleTab} />
+      {message.toolCallCards.map((card, i) => (
+        <ToolCallCard key={`${messageIndex}-${card.callId}-${i}`} card={card} onToggleTab={onToggleTab} />
       ))}
 
       {(message.textContent || message.isStreaming) && (

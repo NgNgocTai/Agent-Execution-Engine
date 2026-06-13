@@ -104,7 +104,7 @@ export default function ChatLayout() {
                         </span>
                       )}
                     </div>
-                    <ReasoningTrace message={msg} onToggleTab={toggleTab} />
+                    <ReasoningTrace message={msg} messageIndex={i} onToggleTab={toggleTab} />
                   </div>
                 )}
               </div>
