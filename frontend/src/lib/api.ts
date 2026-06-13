@@ -19,3 +19,33 @@ export async function sendMessage(
 export async function getConfig(): Promise<{ providers: string[] }> {
   return fetch(`${API_BASE}/config`).then((r) => r.json());
 }
+
+export interface ConversationEntry {
+  id: string;
+  provider: string;
+  title: string;
+  created_at: string;
+}
+
+export async function getConversations(): Promise<ConversationEntry[]> {
+  const data = await fetch(`${API_BASE}/conversations`).then((r) => r.json());
+  return data.conversations || [];
+}
+
+export interface ConversationMessages {
+  conversation_id: string;
+  provider: string;
+  messages: Array<{
+    role: string;
+    content?: string;
+    tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
+    tool_call_id?: string;
+    name?: string;
+  }>;
+}
+
+export async function getConversationMessages(
+  conversationId: string,
+): Promise<ConversationMessages> {
+  return fetch(`${API_BASE}/conversations/${conversationId}/messages`).then((r) => r.json());
+}
