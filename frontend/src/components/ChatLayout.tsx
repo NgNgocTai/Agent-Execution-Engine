@@ -13,6 +13,8 @@ export default function ChatLayout() {
     send, newChat, switchProvider, toggleTab, loadConversation,
   } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const prevContentLen = useRef(0);
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
 
   const refreshConversations = async () => {
@@ -29,7 +31,14 @@ export default function ChatLayout() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const totalLen = messages.reduce(
+      (sum, m) => sum + m.textContent.length + m.content.length + m.toolCallCards.length * 10,
+      0,
+    );
+    if (totalLen > prevContentLen.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevContentLen.current = totalLen;
   }, [messages]);
 
   useEffect(() => {
@@ -38,19 +47,11 @@ export default function ChatLayout() {
     }
   }, [conversationId]);
 
-  const handleNewChat = () => {
-    newChat();
-  };
-
-  const handleLoadConversation = async (id: string) => {
-    await loadConversation(id);
-  };
-
   return (
     <div className="flex h-screen bg-[#f9f9f9] font-sans text-[#1a1c1c] overflow-hidden">
       <Sidebar
-        onNewChat={handleNewChat}
-        onLoadConversation={handleLoadConversation}
+        onNewChat={newChat}
+        onLoadConversation={loadConversation}
         sessions={conversations}
         activeConversationId={conversationId}
       />
@@ -61,7 +62,7 @@ export default function ChatLayout() {
           conversationId={conversationId}
         />
 
-        <main className="flex-1 overflow-y-auto px-6 pt-[88px] pb-32">
+        <main ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 pt-[88px] pb-32">
           <div className="max-w-[800px] mx-auto space-y-8">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-[60vh] text-center">
@@ -77,7 +78,7 @@ export default function ChatLayout() {
             )}
 
             {messages.map((msg, i) => (
-              <div key={i}>
+              <div key={`msg-${i}`}>
                 {msg.role === "user" ? (
                   <div className="flex flex-col items-end">
                     <div className="bg-[#0050cb] text-white rounded-2xl rounded-tr-none px-6 py-3.5 max-w-[85%] text-[15px] shadow-sm leading-relaxed">
