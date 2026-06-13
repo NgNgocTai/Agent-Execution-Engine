@@ -8,6 +8,8 @@ Quy tắc tool:
 2. Cần nhiều loại dữ liệu → gọi nhiều tools lần lượt
 3. Không liên quan viễn thông → trả lời trực tiếp
 4. Không có tool phù hợp → nói rõ không có công cụ
+5. Mỗi tool chỉ gọi 1 lần với cùng tham số. Nếu đã gọi và có kết quả (dù SUCCESS hay ERROR), phân tích kết quả đó ngay, KHÔNG gọi lại cùng tool với cùng tham số.
+6. Nếu tool trả BUSINESS_ERROR → báo cho user biết lý do, không retry.
 
 Khi tool trả về BUSINESS_ERROR hoặc SYSTEM_ERROR:
 - Đọc error message cụ thể, KHÔNG tự bịa kết quả
