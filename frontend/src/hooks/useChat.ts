@@ -40,9 +40,11 @@ export function useChat() {
           break;
 
         case "tool_call_start": {
+          const rawName = event.data.tool_name as string;
+          const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
           const card: ToolCallCard = {
-            callId: event.data.call_id as string,
-            toolName: event.data.tool_name as string,
+            callId: (event.data.call_id as string) || `tc_${Date.now()}_${Math.random()}`,
+            toolName: cleanName,
             arguments: (event.data.arguments as Record<string, unknown>) || {},
             status: "loading",
             result: null,
@@ -157,6 +159,17 @@ export function useChat() {
     setIsStreaming(false);
   }, [cancel]);
 
+  const toggleTab = useCallback((callId: string, showInput: boolean) => {
+    setMessages((prev) =>
+      prev.map((msg) => ({
+        ...msg,
+        toolCallCards: msg.toolCallCards.map((c) =>
+          c.callId === callId ? { ...c, showInput } : c,
+        ),
+      })),
+    );
+  }, []);
+
   const switchProvider = useCallback(
     (provider: string) => {
       setCurrentProvider(provider);
@@ -173,5 +186,6 @@ export function useChat() {
     send,
     newChat,
     switchProvider,
+    toggleTab,
   };
 }

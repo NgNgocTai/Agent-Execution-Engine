@@ -1,4 +1,3 @@
-import { Network } from "lucide-react";
 import type { ChatMessage } from "../types";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallCard from "./ToolCallCard";
@@ -6,9 +5,10 @@ import TextResponse from "./TextResponse";
 
 interface Props {
   message: ChatMessage;
+  onToggleTab?: (callId: string, showInput: boolean) => void;
 }
 
-export default function ReasoningTrace({ message }: Props) {
+export default function ReasoningTrace({ message, onToggleTab }: Props) {
   return (
     <div className="bg-white border border-[#e2e2e2] rounded-2xl rounded-tl-none px-6 py-5 w-full shadow-sm space-y-4">
       {message.thinkingBlocks.length > 0 && (
@@ -16,7 +16,7 @@ export default function ReasoningTrace({ message }: Props) {
       )}
 
       {message.toolCallCards.map((card) => (
-        <ToolCallCard key={card.callId} card={card} />
+        <ToolCallCard key={card.callId} card={card} onToggleTab={onToggleTab} />
       ))}
 
       {(message.textContent || message.isStreaming) && (

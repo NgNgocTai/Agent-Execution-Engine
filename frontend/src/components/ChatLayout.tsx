@@ -7,7 +7,7 @@ import ChatInput from "./ChatInput";
 import { useChat } from "../hooks/useChat";
 
 export default function ChatLayout() {
-  const { messages, conversationId, isStreaming, currentProvider, send, newChat, switchProvider } =
+  const { messages, conversationId, isStreaming, currentProvider, send, newChat, switchProvider, toggleTab } =
     useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -64,7 +64,7 @@ export default function ChatLayout() {
                         {msg.timestamp}
                       </span>
                     </div>
-                    <ReasoningTrace message={msg} />
+                    <ReasoningTrace message={msg} onToggleTab={toggleTab} />
                   </div>
                 )}
               </div>
