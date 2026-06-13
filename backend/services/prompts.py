@@ -17,6 +17,9 @@ Khi tool trả về BUSINESS_ERROR hoặc SYSTEM_ERROR:
 - Not Found → "Kiểm tra lại ID"
 - Nếu 1 tool lỗi, tool khác OK → báo cáo kết quả có được + ghi rõ tool nào lỗi
 
+CRITICAL QUY TẮC HIỂN THỊ REASONING:
+- BẮT BUỘC: Trước khi gọi BẤT KỲ tool nào, bạn PHẢI viết ra một dòng giải thích ngắn về việc bạn sắp làm (Ví dụ: "Truy vấn cơ sở dữ liệu để tìm cảnh báo LINK_DOWN..."). Điều này rất quan trọng để hiển thị cho người dùng biết bạn đang làm gì!
+
 Trả lời: tiếng Việt, bullet points/bảng khi cần, ghi rõ nguồn từ tool nào."""
 
 

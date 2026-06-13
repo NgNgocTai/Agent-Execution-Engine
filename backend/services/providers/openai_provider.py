@@ -97,23 +97,15 @@ class OpenAIProvider(LLMProvider):
                     if idx not in tool_call_buffers:
                         tool_call_buffers[idx] = {
                             "id": tc_delta.id or "",
-                            "name": tc_delta.function.name if tc_delta.function else "",
+                            "name": "",
                             "arguments_str": "",
                         }
-                        if tc_delta.function and tc_delta.function.name:
-                            yield NormalizedResponse(
-                                tool_calls=[
-                                    NormalizedToolCall(
-                                        call_id=tc_delta.id or "",
-                                        tool_name=tc_delta.function.name,
-                                        arguments={},
-                                    )
-                                ],
-                                stop_reason="tool_calls",
-                            )
-
-                    if tc_delta.function and tc_delta.function.arguments:
-                        tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
+                    
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            tool_call_buffers[idx]["name"] += tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
 
             if delta.content:
                 yield NormalizedResponse(
@@ -127,7 +119,7 @@ class OpenAIProvider(LLMProvider):
                     tool_calls=[
                         NormalizedToolCall(
                             call_id=buf["id"],
-                            tool_name=buf["name"],
+                            tool_name=buf["name"].split("<")[0] if buf["name"] else "",
                             arguments=json.loads(buf["arguments_str"]) if buf["arguments_str"] else {},
                         )
                         for buf in tool_call_buffers.values()
