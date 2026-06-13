@@ -1,18 +1,14 @@
 import { Plus, Network, MessageSquare } from "lucide-react";
-
-interface SessionEntry {
-  id: string;
-  title: string;
-  provider: string;
-  timestamp: string;
-}
+import type { ConversationEntry } from "../lib/api";
 
 interface Props {
   onNewChat: () => void;
-  sessions: SessionEntry[];
+  onLoadConversation: (id: string) => void;
+  sessions: ConversationEntry[];
+  activeConversationId: string | null;
 }
 
-export default function Sidebar({ onNewChat, sessions }: Props) {
+export default function Sidebar({ onNewChat, onLoadConversation, sessions, activeConversationId }: Props) {
   return (
     <aside className="w-[260px] flex flex-col h-screen fixed left-0 top-0 bg-white border-r border-[#e2e2e2] z-50">
       <div className="p-4 flex flex-col h-full">
@@ -45,18 +41,23 @@ export default function Sidebar({ onNewChat, sessions }: Props) {
               <p className="px-3 py-2 text-xs text-[#727687]">No sessions yet</p>
             )}
             {sessions.map((s) => (
-              <div
+              <button
                 key={s.id}
-                className="flex items-center gap-2 group px-3 py-2.5 rounded-lg transition-colors text-[#424656] hover:text-[#1a1c1c] hover:bg-[#f3f3f4] cursor-default"
+                onClick={() => onLoadConversation(s.id)}
+                className={`flex items-center gap-2 w-full text-left px-3 py-2.5 rounded-lg transition-colors ${
+                  s.id === activeConversationId
+                    ? "bg-[#e8effd] text-[#0050cb]"
+                    : "text-[#424656] hover:text-[#1a1c1c] hover:bg-[#f3f3f4]"
+                }`}
               >
                 <MessageSquare size={14} className="shrink-0 text-[#727687]" />
                 <div className="flex flex-col min-w-0 pr-2">
                   <span className="text-sm font-bold truncate">{s.title}</span>
                   <span className="text-[10px] text-[#727687] mt-0.5">
-                    {s.provider} · {s.timestamp}
+                    {s.provider}
                   </span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </nav>

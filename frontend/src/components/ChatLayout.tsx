@@ -1,23 +1,59 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Network } from "lucide-react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import ReasoningTrace from "./ReasoningTrace";
 import ChatInput from "./ChatInput";
 import { useChat } from "../hooks/useChat";
+import { getConversations, type ConversationEntry } from "../lib/api";
 
 export default function ChatLayout() {
-  const { messages, conversationId, isStreaming, currentProvider, sessions, send, newChat, switchProvider, toggleTab } =
-    useChat();
+  const {
+    messages, conversationId, isStreaming, currentProvider,
+    send, newChat, switchProvider, toggleTab, loadConversation,
+  } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [conversations, setConversations] = useState<ConversationEntry[]>([]);
+
+  const refreshConversations = async () => {
+    try {
+      const data = await getConversations();
+      setConversations(data);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    refreshConversations();
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (conversationId) {
+      refreshConversations();
+    }
+  }, [conversationId]);
+
+  const handleNewChat = () => {
+    newChat();
+  };
+
+  const handleLoadConversation = async (id: string) => {
+    await loadConversation(id);
+  };
+
   return (
     <div className="flex h-screen bg-[#f9f9f9] font-sans text-[#1a1c1c] overflow-hidden">
-      <Sidebar onNewChat={newChat} sessions={sessions} />
+      <Sidebar
+        onNewChat={handleNewChat}
+        onLoadConversation={handleLoadConversation}
+        sessions={conversations}
+        activeConversationId={conversationId}
+      />
       <div className="flex-1 flex flex-col min-w-0 ml-[260px] relative">
         <Header
           currentProvider={currentProvider}
@@ -47,11 +83,13 @@ export default function ChatLayout() {
                     <div className="bg-[#0050cb] text-white rounded-2xl rounded-tr-none px-6 py-3.5 max-w-[85%] text-[15px] shadow-sm leading-relaxed">
                       <p>{msg.content}</p>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-2 px-1 text-xs font-semibold text-[#727687]">
-                      <span>You</span>
-                      <span className="w-1 h-1 bg-[#727687] rounded-full"></span>
-                      <span>{msg.timestamp}</span>
-                    </div>
+                    {msg.timestamp && (
+                      <div className="flex items-center gap-1.5 mt-2 px-1 text-xs font-semibold text-[#727687]">
+                        <span>You</span>
+                        <span className="w-1 h-1 bg-[#727687] rounded-full"></span>
+                        <span>{msg.timestamp}</span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex flex-col items-start w-full">
@@ -60,9 +98,11 @@ export default function ChatLayout() {
                         <Network size={14} />
                       </div>
                       <span className="font-bold text-sm text-[#1a1c1c]">NOC Assistant</span>
-                      <span className="text-xs font-semibold text-[#727687] ml-1">
-                        {msg.timestamp}
-                      </span>
+                      {msg.timestamp && (
+                        <span className="text-xs font-semibold text-[#727687] ml-1">
+                          {msg.timestamp}
+                        </span>
+                      )}
                     </div>
                     <ReasoningTrace message={msg} onToggleTab={toggleTab} />
                   </div>
