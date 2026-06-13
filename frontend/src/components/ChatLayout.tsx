@@ -7,7 +7,7 @@ import ChatInput from "./ChatInput";
 import { useChat } from "../hooks/useChat";
 
 export default function ChatLayout() {
-  const { messages, conversationId, isStreaming, currentProvider, send, newChat, switchProvider, toggleTab } =
+  const { messages, conversationId, isStreaming, currentProvider, sessions, send, newChat, switchProvider, toggleTab } =
     useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -17,7 +17,7 @@ export default function ChatLayout() {
 
   return (
     <div className="flex h-screen bg-[#f9f9f9] font-sans text-[#1a1c1c] overflow-hidden">
-      <Sidebar onNewChat={newChat} />
+      <Sidebar onNewChat={newChat} sessions={sessions} />
       <div className="flex-1 flex flex-col min-w-0 ml-[260px] relative">
         <Header
           currentProvider={currentProvider}

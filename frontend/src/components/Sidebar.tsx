@@ -1,10 +1,18 @@
-import { Plus, Network, MoreHorizontal } from "lucide-react";
+import { Plus, Network, MessageSquare } from "lucide-react";
+
+interface SessionEntry {
+  id: string;
+  title: string;
+  provider: string;
+  timestamp: string;
+}
 
 interface Props {
   onNewChat: () => void;
+  sessions: SessionEntry[];
 }
 
-export default function Sidebar({ onNewChat }: Props) {
+export default function Sidebar({ onNewChat, sessions }: Props) {
   return (
     <aside className="w-[260px] flex flex-col h-screen fixed left-0 top-0 bg-white border-r border-[#e2e2e2] z-50">
       <div className="p-4 flex flex-col h-full">
@@ -31,6 +39,25 @@ export default function Sidebar({ onNewChat }: Props) {
         <nav className="flex-1 overflow-y-auto space-y-1">
           <div className="px-2 py-2 text-[10px] font-bold text-[#727687] uppercase mb-1 tracking-wider">
             Session History
+          </div>
+          <div className="space-y-1">
+            {sessions.length === 0 && (
+              <p className="px-3 py-2 text-xs text-[#727687]">No sessions yet</p>
+            )}
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center gap-2 group px-3 py-2.5 rounded-lg transition-colors text-[#424656] hover:text-[#1a1c1c] hover:bg-[#f3f3f4] cursor-default"
+              >
+                <MessageSquare size={14} className="shrink-0 text-[#727687]" />
+                <div className="flex flex-col min-w-0 pr-2">
+                  <span className="text-sm font-bold truncate">{s.title}</span>
+                  <span className="text-[10px] text-[#727687] mt-0.5">
+                    {s.provider} · {s.timestamp}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </nav>
 

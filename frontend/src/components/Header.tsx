@@ -20,7 +20,19 @@ export default function Header({ currentProvider, onSwitchProvider, conversation
         <div className="relative group">
           <select
             value={currentProvider}
-            onChange={(e) => onSwitchProvider(e.target.value)}
+            onChange={(e) => {
+              const newProvider = e.target.value;
+              if (newProvider !== currentProvider) {
+                const ok = window.confirm(
+                  `Switch to ${newProvider}? Current conversation will be reset.`,
+                );
+                if (ok) {
+                  onSwitchProvider(newProvider);
+                } else {
+                  e.target.value = currentProvider;
+                }
+              }
+            }}
             className="appearance-none flex items-center gap-1.5 px-3 py-1.5 bg-[#eeeeee] rounded-full text-xs font-bold text-[#0050cb] hover:bg-[#e8effd] transition-colors border border-[#e2e2e2] cursor-pointer pr-7"
           >
             {PROVIDERS.map((p) => (

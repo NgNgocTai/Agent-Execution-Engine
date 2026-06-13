@@ -1,13 +1,40 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import type { AgentEvent, ChatMessage, ToolCallCard, ThinkingBlock } from "../types";
 import { sendMessage } from "../lib/api";
 import { useSSE } from "./useSSE";
+
+interface SessionEntry {
+  id: string;
+  title: string;
+  provider: string;
+  timestamp: string;
+}
+
+const SESSIONS_KEY = "noc_agent_sessions";
+
+function loadSessions(): SessionEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveSession(entry: SessionEntry) {
+  const sessions = loadSessions();
+  const exists = sessions.find((s) => s.id === entry.id);
+  if (!exists) {
+    sessions.unshift(entry);
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions.slice(0, 50)));
+  }
+}
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentProvider, setCurrentProvider] = useState("openai");
+  const [sessions, setSessions] = useState<SessionEntry[]>(loadSessions);
   const { stream, cancel } = useSSE();
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
@@ -42,8 +69,9 @@ export function useChat() {
         case "tool_call_start": {
           const rawName = event.data.tool_name as string;
           const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
+          const uniqueId = `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           const card: ToolCallCard = {
-            callId: (event.data.call_id as string) || `tc_${Date.now()}_${Math.random()}`,
+            callId: uniqueId,
             toolName: cleanName,
             arguments: (event.data.arguments as Record<string, unknown>) || {},
             status: "loading",
@@ -59,22 +87,24 @@ export function useChat() {
           break;
         }
 
-        case "tool_call_result":
-          updateLastAssistant((msg) => ({
-            ...msg,
-            toolCallCards: msg.toolCallCards.map((c) =>
-              c.callId === event.data.call_id
-                ? {
-                    ...c,
-                    status: event.data.status === "success" ? "success" as const : "error" as const,
-                    result: (event.data.result as Record<string, unknown>) || null,
-                    error: (event.data.error as string) || null,
-                    executionTimeMs: (event.data.execution_time_ms as number) || 0,
-                  }
-                : c,
-            ),
-          }));
+        case "tool_call_result": {
+          const resultStatus = event.data.status === "success" ? "success" as const : "error" as const;
+          updateLastAssistant((msg) => {
+            const idx = [...msg.toolCallCards].reverse().findIndex((c) => c.status === "loading");
+            if (idx === -1) return msg;
+            const realIdx = msg.toolCallCards.length - 1 - idx;
+            const updated = [...msg.toolCallCards];
+            updated[realIdx] = {
+              ...updated[realIdx],
+              status: resultStatus,
+              result: (event.data.result as Record<string, unknown>) || null,
+              error: (event.data.error as string) || null,
+              executionTimeMs: (event.data.execution_time_ms as number) || 0,
+            };
+            return { ...msg, toolCallCards: updated };
+          });
           break;
+        }
 
         case "text_delta":
           updateLastAssistant((msg) => ({
@@ -92,9 +122,20 @@ export function useChat() {
           setIsStreaming(false);
           break;
 
-        case "conversation_id":
-          setConversationId(event.data.conversation_id as string);
+        case "conversation_id": {
+          const cid = event.data.conversation_id as string;
+          setConversationId(cid);
+          const firstUser = messagesRef.current.find((m) => m.role === "user");
+          const entry: SessionEntry = {
+            id: cid,
+            title: firstUser?.content.slice(0, 50) || "New chat",
+            provider: currentProvider,
+            timestamp: now(),
+          };
+          saveSession(entry);
+          setSessions(loadSessions());
           break;
+        }
 
         case "error":
           updateLastAssistant((msg) => ({
@@ -183,6 +224,7 @@ export function useChat() {
     conversationId,
     isStreaming,
     currentProvider,
+    sessions,
     send,
     newChat,
     switchProvider,
