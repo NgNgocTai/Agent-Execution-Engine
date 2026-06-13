@@ -13,7 +13,7 @@ const PROVIDERS = [
 
 export default function Header({ currentProvider, onSwitchProvider, conversationId }: Props) {
   return (
-    <header className="flex justify-between items-center h-16 px-6 fixed top-0 w-[calc(100%-260px)] z-40 bg-[#f9f9f9] border-b border-[#e2e2e2]">
+    <header className="flex justify-between items-center h-16 px-6 shrink-0 bg-[#f9f9f9] border-b border-[#e2e2e2]">
       <div className="flex items-center gap-4">
         <span className="text-lg font-bold text-[#1a1c1c] tracking-tight">NOC Agent Assistant</span>
         <div className="h-4 w-[1px] bg-[#e2e2e2]"></div>

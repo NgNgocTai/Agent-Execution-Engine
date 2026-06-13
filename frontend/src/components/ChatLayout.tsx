@@ -26,6 +26,21 @@ export default function ChatLayout() {
     }
   };
 
+  const handleDeleteConversation = async (id: string) => {
+    try {
+      const { deleteConversation } = await import("../lib/api");
+      const success = await deleteConversation(id);
+      if (success) {
+        if (id === conversationId) {
+          newChat();
+        }
+        refreshConversations();
+      }
+    } catch (e) {
+      console.error("Failed to delete conversation", e);
+    }
+  };
+
   useEffect(() => {
     refreshConversations();
   }, []);
@@ -52,17 +67,18 @@ export default function ChatLayout() {
       <Sidebar
         onNewChat={newChat}
         onLoadConversation={loadConversation}
+        onDeleteConversation={handleDeleteConversation}
         sessions={conversations}
         activeConversationId={conversationId}
       />
-      <div className="flex-1 flex flex-col min-w-0 ml-[260px] relative">
+      <div className="flex-1 flex flex-col min-w-0 ml-[260px] h-screen">
         <Header
           currentProvider={currentProvider}
           onSwitchProvider={switchProvider}
           conversationId={conversationId}
         />
 
-        <main ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 pt-[88px] pb-32">
+        <main ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 py-6">
           <div className="max-w-[800px] mx-auto space-y-8">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-[60vh] text-center">
@@ -110,7 +126,7 @@ export default function ChatLayout() {
                 )}
               </div>
             ))}
-            <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} className="h-4" />
           </div>
         </main>
 

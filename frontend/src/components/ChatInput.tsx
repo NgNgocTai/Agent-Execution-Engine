@@ -42,7 +42,7 @@ export default function ChatInput({ onSend, isStreaming, currentProvider, onSwit
   };
 
   return (
-    <div className="absolute bottom-0 w-full bg-[#f9f9f9] border-t border-[#e2e2e2] px-6 py-4 pb-6">
+    <div className="shrink-0 w-full bg-[#f9f9f9] border-t border-[#e2e2e2] px-6 py-4 pb-6 z-40">
       <div className="max-w-[800px] mx-auto relative group">
         <textarea
           ref={textareaRef}
