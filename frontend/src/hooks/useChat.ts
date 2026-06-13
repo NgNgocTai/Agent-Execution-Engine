@@ -1,155 +1,16 @@
-import { useCallback, useRef, useState, useEffect } from "react";
-import type { AgentEvent, ChatMessage, ToolCallCard, ThinkingBlock } from "../types";
+import { useCallback, useRef, useState } from "react";
+import type { ChatMessage, ToolCallCard } from "../types";
 import { sendMessage, getConversationMessages } from "../lib/api";
-import { useSSE } from "./useSSE";
-
-interface SessionEntry {
-  id: string;
-  title: string;
-  provider: string;
-  timestamp: string;
-}
-
-const SESSIONS_KEY = "noc_agent_sessions";
-
-function loadSessions(): SessionEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function saveSession(entry: SessionEntry) {
-  const sessions = loadSessions();
-  const exists = sessions.find((s) => s.id === entry.id);
-  if (!exists) {
-    sessions.unshift(entry);
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions.slice(0, 50)));
-  }
-}
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentProvider, setCurrentProvider] = useState("openai");
-  const [sessions, setSessions] = useState<SessionEntry[]>(loadSessions);
-  const { stream, cancel } = useSSE();
-  const messagesRef = useRef<ChatMessage[]>([]);
-  messagesRef.current = messages;
+  const abortRef = useRef<AbortController | null>(null);
 
   const now = () =>
     new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-
-  const updateLastAssistant = useCallback((updater: (msg: ChatMessage) => ChatMessage) => {
-    setMessages((prev) => {
-      const idx = [...prev].reverse().findIndex((m) => m.role === "assistant");
-      if (idx === -1) return prev;
-      const realIdx = prev.length - 1 - idx;
-      const updated = [...prev];
-      updated[realIdx] = updater(updated[realIdx]);
-      return updated;
-    });
-  }, []);
-
-  const handleEvent = useCallback(
-    (event: AgentEvent) => {
-      switch (event.type) {
-        case "thinking":
-          updateLastAssistant((msg) => ({
-            ...msg,
-            thinkingBlocks: [
-              ...msg.thinkingBlocks,
-              { content: event.data.content as string, isExpanded: true },
-            ],
-          }));
-          break;
-
-        case "tool_call_start": {
-          const rawName = event.data.tool_name as string;
-          const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
-          const uniqueId = `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          const card: ToolCallCard = {
-            callId: uniqueId,
-            toolName: cleanName,
-            arguments: (event.data.arguments as Record<string, unknown>) || {},
-            status: "loading",
-            result: null,
-            error: null,
-            executionTimeMs: 0,
-            showInput: true,
-          };
-          updateLastAssistant((msg) => ({
-            ...msg,
-            toolCallCards: [...msg.toolCallCards, card],
-          }));
-          break;
-        }
-
-        case "tool_call_result": {
-          const resultStatus = event.data.status === "success" ? "success" as const : "error" as const;
-          updateLastAssistant((msg) => {
-            const idx = [...msg.toolCallCards].reverse().findIndex((c) => c.status === "loading");
-            if (idx === -1) return msg;
-            const realIdx = msg.toolCallCards.length - 1 - idx;
-            const updated = [...msg.toolCallCards];
-            updated[realIdx] = {
-              ...updated[realIdx],
-              status: resultStatus,
-              result: (event.data.result as Record<string, unknown>) || null,
-              error: (event.data.error as string) || null,
-              executionTimeMs: (event.data.execution_time_ms as number) || 0,
-            };
-            return { ...msg, toolCallCards: updated };
-          });
-          break;
-        }
-
-        case "text_delta":
-          updateLastAssistant((msg) => ({
-            ...msg,
-            textContent: msg.textContent + (event.data.content as string),
-            isStreaming: true,
-          }));
-          break;
-
-        case "final_answer":
-          updateLastAssistant((msg) => ({
-            ...msg,
-            isStreaming: false,
-          }));
-          setIsStreaming(false);
-          break;
-
-        case "conversation_id": {
-          const cid = event.data.conversation_id as string;
-          setConversationId(cid);
-          const firstUser = messagesRef.current.find((m) => m.role === "user");
-          const entry: SessionEntry = {
-            id: cid,
-            title: firstUser?.content.slice(0, 50) || "New chat",
-            provider: currentProvider,
-            timestamp: now(),
-          };
-          saveSession(entry);
-          setSessions(loadSessions());
-          break;
-        }
-
-        case "error":
-          updateLastAssistant((msg) => ({
-            ...msg,
-            textContent:
-              msg.textContent + `\n\n❌ Error: ${event.data.message as string}`,
-            isStreaming: false,
-          }));
-          setIsStreaming(false);
-          break;
-      }
-    },
-    [updateLastAssistant],
-  );
 
   const send = useCallback(
     async (message: string) => {
@@ -178,27 +39,168 @@ export function useChat() {
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setIsStreaming(true);
 
+      const abort = new AbortController();
+      abortRef.current = abort;
+
       try {
         const resp = await sendMessage(message, currentProvider, conversationId);
-        await stream(resp, handleEvent);
+        const reader = resp.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop()!;
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            if (line === "data: [DONE]") continue;
+
+            try {
+              const event = JSON.parse(line.slice(6));
+              const etype = event.type;
+              const edata = event.data;
+
+              if (etype === "thinking") {
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = {
+                    ...updated[last],
+                    thinkingBlocks: [
+                      ...updated[last].thinkingBlocks,
+                      { content: edata.content, isExpanded: true },
+                    ],
+                  };
+                  return updated;
+                });
+              }
+
+              if (etype === "tool_call_start") {
+                const rawName = edata.tool_name || "";
+                const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
+                const card: ToolCallCard = {
+                  callId: `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                  toolName: cleanName,
+                  arguments: edata.arguments || {},
+                  status: "loading",
+                  result: null,
+                  error: null,
+                  executionTimeMs: 0,
+                  showInput: true,
+                };
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = {
+                    ...updated[last],
+                    toolCallCards: [...updated[last].toolCallCards, card],
+                  };
+                  return updated;
+                });
+              }
+
+              if (etype === "tool_call_result") {
+                const status = edata.status === "success" ? "success" as const : "error" as const;
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const cards = [...prev[last].toolCallCards];
+                  const loadingIdx = [...cards].reverse().findIndex((c) => c.status === "loading");
+                  if (loadingIdx === -1) return prev;
+                  const idx = cards.length - 1 - loadingIdx;
+                  cards[idx] = {
+                    ...cards[idx],
+                    status,
+                    result: edata.result || null,
+                    error: edata.error || null,
+                    executionTimeMs: edata.execution_time_ms || 0,
+                  };
+                  const updated = [...prev];
+                  updated[last] = { ...updated[last], toolCallCards: cards };
+                  return updated;
+                });
+              }
+
+              if (etype === "text_delta") {
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = {
+                    ...updated[last],
+                    textContent: updated[last].textContent + (edata.content || ""),
+                  };
+                  return updated;
+                });
+              }
+
+              if (etype === "final_answer") {
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = { ...updated[last], isStreaming: false };
+                  return updated;
+                });
+                setIsStreaming(false);
+              }
+
+              if (etype === "conversation_id") {
+                setConversationId(edata.conversation_id);
+              }
+
+              if (etype === "error") {
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = {
+                    ...updated[last],
+                    textContent: updated[last].textContent + `\n\n❌ ${edata.message}`,
+                    isStreaming: false,
+                  };
+                  return updated;
+                });
+                setIsStreaming(false);
+              }
+            } catch {
+              // skip malformed JSON
+            }
+          }
+        }
       } catch (err) {
-        updateLastAssistant((msg) => ({
-          ...msg,
-          textContent: `❌ Network error: ${(err as Error).message}`,
-          isStreaming: false,
-        }));
+        if ((err as Error).name !== "AbortError") {
+          setMessages((prev) => {
+            const last = prev.length - 1;
+            if (last < 0) return prev;
+            const updated = [...prev];
+            updated[last] = {
+              ...updated[last],
+              textContent: `❌ Network error: ${(err as Error).message}`,
+              isStreaming: false,
+            };
+            return updated;
+          });
+        }
         setIsStreaming(false);
       }
     },
-    [isStreaming, currentProvider, conversationId, stream, handleEvent, updateLastAssistant],
+    [isStreaming, currentProvider, conversationId],
   );
 
   const newChat = useCallback(() => {
-    cancel();
+    abortRef.current?.abort();
     setMessages([]);
     setConversationId(null);
     setIsStreaming(false);
-  }, [cancel]);
+  }, []);
 
   const toggleTab = useCallback((callId: string, showInput: boolean) => {
     setMessages((prev) =>
@@ -211,78 +213,75 @@ export function useChat() {
     );
   }, []);
 
-  const loadConversation = useCallback(
-    async (cid: string) => {
-      cancel();
-      setIsStreaming(false);
+  const loadConversation = useCallback(async (cid: string) => {
+    abortRef.current?.abort();
+    setIsStreaming(false);
 
-      try {
-        const data = await getConversationMessages(cid);
-        const loaded: ChatMessage[] = [];
+    try {
+      const data = await getConversationMessages(cid);
+      const loaded: ChatMessage[] = [];
 
-        for (const msg of data.messages) {
-          if (msg.role === "user") {
-            loaded.push({
-              role: "user",
-              content: msg.content || "",
-              thinkingBlocks: [],
-              toolCallCards: [],
-              textContent: "",
-              isStreaming: false,
-              timestamp: "",
-            });
-          } else if (msg.role === "assistant" && msg.tool_calls) {
-            loaded.push({
-              role: "assistant",
-              content: "",
-              thinkingBlocks: [],
-              toolCallCards: msg.tool_calls.map((tc) => ({
-                callId: tc.id,
-                toolName: tc.function.name,
-                arguments: JSON.parse(tc.function.arguments || "{}"),
-                status: "success" as const,
-                result: null,
-                error: null,
-                executionTimeMs: 0,
-                showInput: true,
-              })),
-              textContent: "",
-              isStreaming: false,
-              timestamp: "",
-            });
-          } else if (msg.role === "tool") {
-            const lastAssistant = [...loaded].reverse().find((m) => m.role === "assistant");
-            if (lastAssistant) {
-              const lastCard = lastAssistant.toolCallCards[lastAssistant.toolCallCards.length - 1];
-              if (lastCard) {
-                try {
-                  lastCard.result = JSON.parse(msg.content || "{}");
-                } catch {
-                  lastCard.result = msg.content || null;
-                }
+      for (const msg of data.messages) {
+        if (msg.role === "user") {
+          loaded.push({
+            role: "user",
+            content: msg.content || "",
+            thinkingBlocks: [],
+            toolCallCards: [],
+            textContent: "",
+            isStreaming: false,
+            timestamp: "",
+          });
+        } else if (msg.role === "assistant" && msg.tool_calls) {
+          loaded.push({
+            role: "assistant",
+            content: "",
+            thinkingBlocks: [],
+            toolCallCards: msg.tool_calls.map((tc) => ({
+              callId: tc.id,
+              toolName: tc.function.name,
+              arguments: JSON.parse(tc.function.arguments || "{}"),
+              status: "success" as const,
+              result: null,
+              error: null,
+              executionTimeMs: 0,
+              showInput: true,
+            })),
+            textContent: "",
+            isStreaming: false,
+            timestamp: "",
+          });
+        } else if (msg.role === "tool") {
+          const lastAssistant = [...loaded].reverse().find((m) => m.role === "assistant");
+          if (lastAssistant) {
+            const lastCard = lastAssistant.toolCallCards[lastAssistant.toolCallCards.length - 1];
+            if (lastCard) {
+              try {
+                lastCard.result = JSON.parse(msg.content || "{}");
+              } catch {
+                lastCard.result = msg.content || null;
               }
             }
-          } else if (msg.role === "assistant" && msg.content) {
-            loaded.push({
-              role: "assistant",
-              content: "",
-              thinkingBlocks: [],
-              toolCallCards: [],
-              textContent: msg.content,
-              isStreaming: false,
-              timestamp: "",
-            });
           }
+        } else if (msg.role === "assistant" && msg.content) {
+          loaded.push({
+            role: "assistant",
+            content: "",
+            thinkingBlocks: [],
+            toolCallCards: [],
+            textContent: msg.content,
+            isStreaming: false,
+            timestamp: "",
+          });
         }
-
-        setMessages(loaded);
-        setConversationId(cid);
-      } catch (err) {
-        console.error("Failed to load conversation:", err);
       }
-    },
-    [cancel],
-  );
+
+      setMessages(loaded);
+      setConversationId(cid);
+    } catch (err) {
+      console.error("Failed to load conversation:", err);
+    }
+  }, []);
 
   const switchProvider = useCallback(
     (provider: string) => {
@@ -297,7 +296,6 @@ export function useChat() {
     conversationId,
     isStreaming,
     currentProvider,
-    sessions,
     send,
     newChat,
     switchProvider,
