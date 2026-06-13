@@ -50,6 +50,29 @@ async def config():
     return {"providers": AVAILABLE_PROVIDERS}
 
 
+@router.get("/conversations/{conversation_id}/messages")
+async def get_conversation_messages(conversation_id: str):
+    async with async_session() as session:
+        repo = ConversationRepository(session)
+        conversation = await repo.get(conversation_id)
+        if not conversation:
+            return {"error": "Conversation not found"}
+        messages = await repo.get_messages(conversation_id)
+        return {
+            "conversation_id": conversation_id,
+            "provider": conversation.provider,
+            "messages": messages,
+        }
+
+
+@router.get("/conversations")
+async def list_conversations():
+    async with async_session() as session:
+        repo = ConversationRepository(session)
+        conversations = await repo.list_all()
+        return {"conversations": conversations}
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest):
     if engine is None:

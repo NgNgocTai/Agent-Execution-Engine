@@ -63,3 +63,25 @@ class ConversationRepository:
                 entry["name"] = msg.name
             messages.append(entry)
         return messages
+
+    async def list_all(self) -> list[dict]:
+        result = await self.session.execute(
+            select(Conversation).order_by(Conversation.created_at.desc())
+        )
+        conversations = []
+        for conv in result.scalars():
+            first_msg = await self.session.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id, Message.role == "user")
+                .order_by(Message.created_at)
+                .limit(1)
+            )
+            first = first_msg.scalar_one_or_none()
+            title = first.content[:50] if first and first.content else "New chat"
+            conversations.append({
+                "id": conv.id,
+                "provider": conv.provider,
+                "title": title,
+                "created_at": str(conv.created_at),
+            })
+        return conversations
