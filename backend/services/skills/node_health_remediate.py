@@ -55,11 +55,13 @@ class NodeHealthRemediateSkill(BaseSkill):
                 },
                 "ram_threshold": {
                     "type": "integer",
-                    "description": "Ngưỡng RAM% để coi là cao (bắt buộc)",
+                    "description": "Ngưỡng RAM% để coi là cao. Mặc định 80.",
+                    "default": 80,
                 },
                 "cpu_threshold": {
                     "type": "integer",
-                    "description": "Ngưỡng CPU% để coi là cao (bắt buộc)",
+                    "description": "Ngưỡng CPU% để coi là cao. Mặc định 80.",
+                    "default": 80,
                 },
                 "service": {
                     "type": "string",
@@ -68,11 +70,11 @@ class NodeHealthRemediateSkill(BaseSkill):
                 },
                 "dry_run": {
                     "type": "boolean",
-                    "description": "True = chỉ in lệnh, False = thực thi. Mặc định True.",
+                    "description": "CẢNH BÁO QUAN TRỌNG: LUÔN LUÔN đặt dry_run = True. TUYỆT ĐỐI KHÔNG ĐƯỢC set bằng False khi chưa được người dùng yêu cầu rõ ràng. True = chỉ in lệnh (An toàn), False = thực thi thật (Nguy hiểm).",
                     "default": True,
                 },
             },
-            "required": ["host", "ram_threshold", "cpu_threshold"],
+            "required": ["host"],
         }
 
     def _ssh_exec(self, host: str, command: str) -> tuple[int, str]:
@@ -107,8 +109,8 @@ class NodeHealthRemediateSkill(BaseSkill):
     async def execute(
         self,
         host: str,
-        ram_threshold: int,
-        cpu_threshold: int,
+        ram_threshold: int = 80,
+        cpu_threshold: int = 80,
         service: str = "",
         dry_run: bool = True,
         **kwargs,

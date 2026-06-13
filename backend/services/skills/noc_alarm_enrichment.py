@@ -42,7 +42,16 @@ class NocAlarmEnrichmentSkill(BaseSkill):
             "required": ["alarm_type"],
         }
 
-    async def execute(self, alarm_type: str, window_min: int = 10, **kwargs) -> SkillResult:
+    async def execute(self, alarm_type: str = "", window_min: int = 10, **kwargs) -> SkillResult:
+        if not alarm_type or not alarm_type.strip():
+            return SkillResult(
+                status=SkillStatus.BUSINESS_ERROR,
+                data=None,
+                error="Thiếu tham số bắt buộc: alarm_type. Vui lòng cung cấp loại cảnh báo (vd: LINK_DOWN, BGP_SESSION_DOWN).",
+            )
+
+        alarm_type = alarm_type.strip().upper()
+
         error_info = await self.device_repo.get_error_by_name(alarm_type)
         if not error_info:
             return SkillResult(
