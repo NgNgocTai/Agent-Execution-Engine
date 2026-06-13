@@ -107,7 +107,11 @@ export function useChat() {
               }
 
               if (etype === "tool_call_result") {
-                const status = edata.status === "success" ? "success" as const : "error" as const;
+                // business_error (như không có data) vẫn coi là tool chạy thành công trên UI
+                const status = (edata.status === "success" || edata.status === "business_error")
+                  ? "success" as const
+                  : "error" as const;
+
                 setMessages((prev) => {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
@@ -232,30 +236,63 @@ export function useChat() {
             isStreaming: false,
             timestamp: "",
           });
-        } else if (msg.role === "assistant" && msg.tool_calls) {
-          loaded.push({
-            role: "assistant",
-            content: "",
-            thinkingBlocks: [],
-            toolCallCards: msg.tool_calls.map((tc) => ({
-              callId: tc.id,
-              toolName: tc.function.name,
-              arguments: JSON.parse(tc.function.arguments || "{}"),
-              status: "success" as const,
-              result: null,
-              error: null,
-              executionTimeMs: 0,
-              showInput: true,
-            })),
-            textContent: "",
-            isStreaming: false,
-            timestamp: "",
-          });
-        } else if (msg.role === "tool") {
-          const lastAssistant = [...loaded].reverse().find((m) => m.role === "assistant");
-          if (lastAssistant) {
-            const lastCard = lastAssistant.toolCallCards[lastAssistant.toolCallCards.length - 1];
-            if (lastCard) {
+        } else {
+          // Group consecutive assistant and tool messages into a single ChatMessage
+          let lastMsg = loaded[loaded.length - 1];
+          if (!lastMsg || lastMsg.role !== "assistant") {
+            lastMsg = {
+              role: "assistant",
+              content: "",
+              thinkingBlocks: [],
+              toolCallCards: [],
+              textContent: "",
+              isStreaming: false,
+              timestamp: "",
+            };
+            loaded.push(lastMsg);
+          }
+
+          if (msg.role === "assistant") {
+            if (msg.content) {
+              lastMsg.textContent += (lastMsg.textContent ? "\n\n" : "") + msg.content;
+            }
+            if (msg.tool_calls) {
+              const newCards = msg.tool_calls.map((tc: any) => {
+                const rawName = tc.function.name || "";
+                const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
+                return {
+                  callId: tc.id,
+                  toolName: cleanName,
+                  arguments: JSON.parse(tc.function.arguments || "{}"),
+                  status: "success" as const,
+                  result: null,
+                  error: null,
+                  executionTimeMs: 0,
+                  showInput: false,
+                };
+              });
+              lastMsg.toolCallCards.push(...newCards);
+
+              if (!msg.content) {
+                const toolNames = newCards.map((c: any) => c.toolName).join(", ");
+                lastMsg.thinkingBlocks.push({
+                  content: `Tiến hành gọi công cụ: ${toolNames}...`,
+                  isExpanded: false,
+                });
+              }
+            }
+          } else if (msg.role === "tool") {
+            const card = lastMsg.toolCallCards.find((c) => c.callId === msg.tool_call_id);
+            if (card) {
+              try {
+                const parsed = JSON.parse(msg.content || "{}");
+                card.result = parsed;
+              } catch {
+                card.result = msg.content || null;
+              }
+            } else if (lastMsg.toolCallCards.length > 0) {
+              // Fallback if tool_call_id is missing/mismatched: append to the last tool card
+              const lastCard = lastMsg.toolCallCards[lastMsg.toolCallCards.length - 1];
               try {
                 lastCard.result = JSON.parse(msg.content || "{}");
               } catch {
@@ -263,16 +300,6 @@ export function useChat() {
               }
             }
           }
-        } else if (msg.role === "assistant" && msg.content) {
-          loaded.push({
-            role: "assistant",
-            content: "",
-            thinkingBlocks: [],
-            toolCallCards: [],
-            textContent: msg.content,
-            isStreaming: false,
-            timestamp: "",
-          });
         }
       }
 
