@@ -26,7 +26,7 @@ class DeviceRepository:
     async def get_error_by_name(self, error_name: str) -> dict | None:
         row = await self._pool.fetchrow(
             "SELECT error_code, name, description, domain, default_severity "
-            "FROM error WHERE name = $1",
+            "FROM error WHERE LOWER(name) = LOWER($1)",
             error_name,
         )
         if row:
