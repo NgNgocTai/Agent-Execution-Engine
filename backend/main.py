@@ -12,6 +12,7 @@ from services.skills.noc_alarm_enrichment import NocAlarmEnrichmentSkill
 from services.skills.node_health_remediate import NodeHealthRemediateSkill
 from services.skills.registry import SkillRegistry
 from services.tool_executor import ToolExecutor
+from tracing.langfuse_tracer import LangfuseTracer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,9 +45,13 @@ async def startup():
     registry.register(NodeHealthRemediateSkill())
 
     tool_executor = ToolExecutor(registry)
+
+    tracer = LangfuseTracer()
+
     engine = AgentEngine(
         tool_executor=tool_executor,
         skill_registry=registry,
+        tracer=tracer,
     )
     set_engine(engine)
 

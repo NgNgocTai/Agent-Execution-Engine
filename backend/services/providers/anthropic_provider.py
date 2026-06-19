@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class AnthropicProvider(LLMProvider):
     def __init__(self) -> None:
         self.client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self.model_name = settings.anthropic_model
 
     def format_tools(self, tools: list[ToolSchema]) -> list[dict]:
         return [
@@ -74,9 +75,19 @@ class AnthropicProvider(LLMProvider):
         ) as stream:
             current_tool: dict | None = None
             json_buffer = ""
+            input_tokens = 0
+            output_tokens = 0
 
             async for event in stream:
-                if event.type == "content_block_start":
+                if event.type == "message_start":
+                    if hasattr(event.message, "usage") and event.message.usage:
+                        input_tokens = event.message.usage.input_tokens
+                        
+                elif event.type == "message_delta":
+                    if hasattr(event, "usage") and event.usage:
+                        output_tokens = event.usage.output_tokens
+                        
+                elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         current_tool = {
                             "id": event.content_block.id,
@@ -119,4 +130,8 @@ class AnthropicProvider(LLMProvider):
                         current_tool = None
 
                 elif event.type == "message_stop":
+                    if input_tokens > 0 or output_tokens > 0:
+                        yield NormalizedResponse(
+                            token_usage={"input": input_tokens, "output": output_tokens}
+                        )
                     yield NormalizedResponse(stop_reason="end_turn")

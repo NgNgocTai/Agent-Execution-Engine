@@ -12,6 +12,8 @@ from services.skills.registry import SkillRegistry
 from services.tool_executor import ToolExecutor
 from services.skills.base import SkillStatus
 from services.skills.base import SkillResult
+from tracing.langfuse_tracer import LangfuseTracer
+
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 10
@@ -22,7 +24,7 @@ class AgentEngine:
         self,
         tool_executor: ToolExecutor,
         skill_registry: SkillRegistry,
-        tracer: object | None = None,
+        tracer: LangfuseTracer | None = None,
     ) -> None:
         self.tool_executor = tool_executor
         self.skill_registry = skill_registry
@@ -45,12 +47,33 @@ class AgentEngine:
 
         global_executed_tools = set()
 
+        # --- Langfuse: Tạo Trace cho toàn bộ phiên làm việc ---
+        provider_name = type(provider).__name__
+        trace_ctx = (
+            self.tracer.create_trace(session_id, user_message, provider_name)
+            if self.tracer
+            else None
+        )
+
         while iteration < MAX_ITERATIONS:
             iteration += 1
             pending_tool_calls: list[NormalizedToolCall] = []
             accumulated_text = ""
 
+            # --- Langfuse: Bắt đầu ghi nhận LLM Call ---
+            model_name = getattr(provider, "model_name", "unknown")
+            gen_ctx = (
+                trace_ctx.start_llm_generation(iteration, model_name, messages, tools)
+                if trace_ctx
+                else None
+            )
+
+            total_token_usage = None
+
             async for response in provider.chat_completion(messages, tools):
+                if response.token_usage:
+                    total_token_usage = response.token_usage
+
                 if response.tool_calls:
                     for tc in response.tool_calls:
                         # Deduplicate identical tool calls in the same iteration
@@ -72,6 +95,17 @@ class AgentEngine:
                     # Streaming ngay lập tức để UI mượt mà, không chờ gom hết
                     yield emitter.text_delta(response.text_content)
 
+            # --- Langfuse: Kết thúc LLM Call, ghi output ---
+            if gen_ctx:
+                gen_ctx.end(
+                    output=accumulated_text or None,
+                    tool_calls=[
+                        {"name": tc.tool_name, "arguments": tc.arguments}
+                        for tc in pending_tool_calls
+                    ] if pending_tool_calls else None,
+                    usage=total_token_usage,
+                )
+
             # Nếu có tool calls mà LLM lười không giải thích -> Tự động tạo reasoning
             if pending_tool_calls:
                 if not accumulated_text:
@@ -88,7 +122,14 @@ class AgentEngine:
 
             for tc in pending_tool_calls:
                 tc_key = (tc.tool_name, json.dumps(tc.arguments, sort_keys=True))
-                
+
+                # --- Langfuse: Bắt đầu ghi nhận Tool Call ---
+                tool_span = (
+                    trace_ctx.start_tool_span(tc.tool_name, tc.arguments, iteration)
+                    if trace_ctx
+                    else None
+                )
+
                 if tc_key in global_executed_tools:
                     result = SkillResult(
                         status=SkillStatus.BUSINESS_ERROR,
@@ -100,6 +141,15 @@ class AgentEngine:
                     result = await self.tool_executor.execute(tc.tool_name, tc.arguments)
                 
                 total_tool_calls += 1
+
+                # --- Langfuse: Kết thúc Tool Call, ghi kết quả ---
+                if tool_span:
+                    tool_span.end(
+                        status=result.status,
+                        result=result.data,
+                        error=result.error,
+                        execution_time_ms=result.execution_time_ms,
+                    )
 
                 yield emitter.tool_call_result(
                     call_id=tc.call_id,
@@ -115,6 +165,12 @@ class AgentEngine:
                 )
                 messages.append(tool_msg)
         else:
+            # --- Langfuse: Ghi nhận lỗi vượt giới hạn ---
+            if trace_ctx:
+                trace_ctx.finalize(total_tool_calls, (time.monotonic() - start_time) * 1000, output="MAX_ITERATIONS_REACHED")
+            if self.tracer:
+                self.tracer.flush()
+
             yield emitter.error(
                 message=f"Đã đạt giới hạn {MAX_ITERATIONS} bước xử lý.",
                 code="MAX_ITERATIONS",
@@ -124,6 +180,16 @@ class AgentEngine:
         total_duration_ms = (time.monotonic() - start_time) * 1000
 
         updated_messages = messages[1:]
+
+        # --- Langfuse: Tổng kết Trace ---
+        if trace_ctx:
+            trace_ctx.finalize(
+                total_tool_calls=total_tool_calls,
+                total_duration_ms=total_duration_ms,
+                output=accumulated_text or None,
+            )
+        if self.tracer:
+            self.tracer.flush()
 
         yield emitter.final_answer(
             total_tool_calls=total_tool_calls,

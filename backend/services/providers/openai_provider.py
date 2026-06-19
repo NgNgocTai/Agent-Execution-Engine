@@ -18,6 +18,7 @@ class OpenAIProvider(LLMProvider):
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
         )
+        self.model_name = settings.openai_model
 
     def format_tools(self, tools: list[ToolSchema]) -> list[dict]:
         return [
@@ -75,6 +76,7 @@ class OpenAIProvider(LLMProvider):
                 messages=messages,
                 tools=tools if tools else None,
                 stream=True,
+                stream_options={"include_usage": True},
             )
         except Exception as e:
             logger.error("LLM API error: %s", e)
@@ -128,3 +130,12 @@ class OpenAIProvider(LLMProvider):
                 )
             elif finish_reason == "stop":
                 yield NormalizedResponse(stop_reason="end_turn")
+            
+            if hasattr(chunk, "usage") and chunk.usage:
+                yield NormalizedResponse(
+                    token_usage={
+                        "input": chunk.usage.prompt_tokens,
+                        "output": chunk.usage.completion_tokens,
+                    }
+                )
+
