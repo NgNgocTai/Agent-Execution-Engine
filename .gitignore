@@ -11,6 +11,9 @@ implementation_v1/
 .env.*
 !.env.example
 
+# Database
+*.db
+
 # Python
 __pycache__/
 *.py[cod]
