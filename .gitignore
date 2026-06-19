@@ -5,6 +5,9 @@ implementation_v1/
 *.jpg
 *.jpeg
 *.md
+!skills/
+!skills/**/*.md
+!skills/*.md
 
 # Environments
 .env
