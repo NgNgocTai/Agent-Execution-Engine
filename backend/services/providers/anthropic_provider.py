@@ -5,7 +5,7 @@ from typing import AsyncGenerator
 from anthropic import AsyncAnthropic
 
 from core.config import settings
-from core.schemas import NormalizedResponse, NormalizedToolCall
+from core.schemas import NormalizedMessage, NormalizedResponse, NormalizedToolCall
 from services.providers.base import LLMProvider
 from services.skills.base import ToolSchema
 
@@ -27,51 +27,65 @@ class AnthropicProvider(LLMProvider):
             for t in tools
         ]
 
-    def build_tool_result_message(
-        self,
-        tool_call_id: str,
-        tool_name: str,
-        result: str,
-    ) -> dict:
-        return {
-            "role": "user",
-            "content": [
-                {
+    def _convert_to_anthropic_messages(self, messages: list[NormalizedMessage]) -> list[dict]:
+        anthropic_msgs = []
+        for msg in messages:
+            # Anthropic chỉ chấp nhận role "user" và "assistant"
+            role = "assistant" if msg.role == "assistant" else "user"
+            
+            blocks = []
+            if msg.role == "tool":
+                blocks.append({
                     "type": "tool_result",
-                    "tool_use_id": tool_call_id,
-                    "content": result,
-                }
-            ],
-        }
-
-    def build_assistant_message_with_tools(
-        self,
-        tool_calls: list[NormalizedToolCall],
-    ) -> dict:
-        return {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "tool_use",
-                    "id": tc.call_id,
-                    "name": tc.tool_name,
-                    "input": tc.arguments,
-                }
-                for tc in tool_calls
-            ],
-        }
+                    "tool_use_id": msg.tool_call_id,
+                    "content": msg.content or "",
+                    "is_error": msg.is_error,
+                })
+            elif msg.role == "assistant" and msg.tool_calls:
+                if msg.content:
+                    blocks.append({"type": "text", "text": msg.content})
+                for tc in msg.tool_calls:
+                    blocks.append({
+                        "type": "tool_use",
+                        "id": tc.call_id,
+                        "name": tc.tool_name,
+                        "input": tc.arguments,
+                    })
+            else:
+                if msg.content:
+                    blocks.append({"type": "text", "text": msg.content})
+            
+            if not blocks:
+                continue
+                
+            # Tự động gộp các message liên tiếp cùng role để không vi phạm rule của Anthropic
+            if anthropic_msgs and anthropic_msgs[-1]["role"] == role:
+                if isinstance(anthropic_msgs[-1]["content"], list):
+                    anthropic_msgs[-1]["content"].extend(blocks)
+                else:
+                    old_text = anthropic_msgs[-1]["content"]
+                    anthropic_msgs[-1]["content"] = [{"type": "text", "text": old_text}] + blocks
+            else:
+                anthropic_msgs.append({
+                    "role": role,
+                    "content": blocks
+                })
+        return anthropic_msgs
 
     async def chat_completion(
         self,
-        messages: list[dict],
-        tools: list[dict],
+        messages: list[NormalizedMessage],
+        tools: list[ToolSchema],
         stream: bool = True,
     ) -> AsyncGenerator[NormalizedResponse, None]:
+        anthropic_messages = self._convert_to_anthropic_messages(messages)
+        anthropic_tools = self.format_tools(tools) if tools else []
+
         async with self.client.messages.stream(
             model=settings.anthropic_model,
             max_tokens=4096,
-            messages=messages,
-            tools=tools if tools else [],
+            messages=anthropic_messages,
+            tools=anthropic_tools,
         ) as stream:
             current_tool: dict | None = None
             json_buffer = ""
