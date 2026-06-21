@@ -258,12 +258,29 @@ export function useChat() {
             }
             if (msg.tool_calls) {
               const newCards = msg.tool_calls.map((tc: any) => {
-                const rawName = tc.function.name || "";
+                // Hỗ trợ cả 2 format: OpenAI gốc và NormalizedToolCall mới
+                const rawName = (tc.function && tc.function.name) || tc.tool_name || "";
                 const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
+                
+                let parsedArgs = tc.arguments || {};
+                if (tc.function && tc.function.arguments) {
+                  try {
+                    parsedArgs = JSON.parse(tc.function.arguments);
+                  } catch {
+                    parsedArgs = {};
+                  }
+                } else if (typeof parsedArgs === "string") {
+                  try {
+                    parsedArgs = JSON.parse(parsedArgs);
+                  } catch {
+                    parsedArgs = {};
+                  }
+                }
+
                 return {
-                  callId: tc.id,
+                  callId: tc.id || tc.call_id,
                   toolName: cleanName,
-                  arguments: JSON.parse(tc.function.arguments || "{}"),
+                  arguments: parsedArgs,
                   status: "success" as const,
                   result: null,
                   error: null,
