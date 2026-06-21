@@ -62,7 +62,7 @@ class NocAlarmEnrichmentSkill(BaseSkill):
 
         error_code = error_info["error_code"]
 
-        alarms = self.alarm_repo.get_alarms(error_code, window_min)
+        alarms, total_alarms = self.alarm_repo.get_alarms(error_code, window_min, limit=50)
         if not alarms:
             return SkillResult(
                 status=SkillStatus.BUSINESS_ERROR,
@@ -105,10 +105,12 @@ class NocAlarmEnrichmentSkill(BaseSkill):
             status=SkillStatus.SUCCESS,
             data={
                 "alarms": enriched,
-                "total": len(enriched),
+                "total_alarms_in_db": total_alarms,
+                "displayed_alarms": len(enriched),
                 "alarm_type": alarm_type,
                 "error_info": error_info,
                 "window_min": window_min,
+                "note": f"Vì số lượng cảnh báo quá lớn ({total_alarms}), hệ thống chỉ hiển thị chi tiết {len(enriched)} cảnh báo mới nhất để tránh quá tải bộ nhớ." if total_alarms > len(enriched) else ""
             },
         )
 

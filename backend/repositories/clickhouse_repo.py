@@ -18,8 +18,14 @@ class AlarmRepository:
             database=settings.clickhouse_database,
         )
 
-    def get_alarms(self, error_code: str, window_min: int = 10) -> list[dict]:
+    def get_alarms(self, error_code: str, window_min: int = 10, limit: int = 50) -> tuple[list[dict], int]:
         since = datetime.utcnow() - timedelta(minutes=window_min)
+        
+        count_query = """
+            SELECT count(*) FROM alarm
+            WHERE error_code = %(code)s AND time_created >= %(since)s
+        """
+        
         query = """
             SELECT alarm_id, error_code, device_id,
                    time_created, time_solved, status,
@@ -28,13 +34,20 @@ class AlarmRepository:
             WHERE error_code = %(code)s
               AND time_created >= %(since)s
             ORDER BY time_created DESC
+            LIMIT %(limit)s
         """
         try:
+            total_count = self.client.query(count_query, parameters={
+                "code": error_code,
+                "since": since,
+            }).result_rows[0][0]
+
             result = self.client.query(query, parameters={
                 "code": error_code,
                 "since": since,
+                "limit": limit,
             })
-            return [
+            alarms = [
                 {
                     "alarm_id": row[0],
                     "error_code": row[1],
@@ -48,9 +61,10 @@ class AlarmRepository:
                 }
                 for row in result.result_rows
             ]
+            return alarms, total_count
         except Exception as e:
             logger.error("ClickHouse query error: %s", e)
-            return []
+            return [], 0
 
     def close(self) -> None:
         self.client.close()

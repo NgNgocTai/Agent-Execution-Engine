@@ -31,6 +31,7 @@ class ConversationRepository:
         tool_calls: list[dict] | None = None,
         tool_call_id: str | None = None,
         name: str | None = None,
+        is_error: bool = False,
     ) -> Message:
         msg = Message(
             conversation_id=conversation_id,
@@ -39,6 +40,7 @@ class ConversationRepository:
             tool_calls=json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
             tool_call_id=tool_call_id,
             name=name,
+            is_error=is_error,
         )
         self.session.add(msg)
         await self.session.commit()
@@ -52,7 +54,7 @@ class ConversationRepository:
         )
         messages = []
         for msg in result.scalars():
-            entry: dict = {"role": msg.role}
+            entry: dict = {"role": msg.role, "is_error": msg.is_error}
             if msg.content is not None:
                 entry["content"] = msg.content
             if msg.tool_calls is not None:

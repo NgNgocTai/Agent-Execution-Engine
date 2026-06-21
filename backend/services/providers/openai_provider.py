@@ -5,7 +5,7 @@ from typing import AsyncGenerator
 from openai import AsyncOpenAI
 
 from core.config import settings
-from core.schemas import NormalizedResponse, NormalizedToolCall
+from core.schemas import NormalizedMessage, NormalizedResponse, NormalizedToolCall
 from services.providers.base import LLMProvider
 from services.skills.base import ToolSchema
 
@@ -33,48 +33,52 @@ class OpenAIProvider(LLMProvider):
             for t in tools
         ]
 
-    def build_tool_result_message(
-        self,
-        tool_call_id: str,
-        tool_name: str,
-        result: str,
-    ) -> dict:
-        return {
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": result,
-        }
-
-    def build_assistant_message_with_tools(
-        self,
-        tool_calls: list[NormalizedToolCall],
-    ) -> dict:
-        return {
-            "role": "assistant",
-            "tool_calls": [
-                {
-                    "id": tc.call_id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.tool_name,
-                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                    },
-                }
-                for tc in tool_calls
-            ],
-        }
+    def _convert_to_openai_messages(self, messages: list[NormalizedMessage]) -> list[dict]:
+        openai_msgs = []
+        for msg in messages:
+            if msg.role == "tool":
+                openai_msgs.append({
+                    "role": "tool",
+                    "tool_call_id": msg.tool_call_id,
+                    "content": msg.content or "",
+                })
+            elif msg.role == "assistant" and msg.tool_calls:
+                openai_msgs.append({
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.call_id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.tool_name,
+                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                })
+            else:
+                openai_msgs.append({
+                    "role": msg.role,
+                    "content": msg.content,
+                })
+        return openai_msgs
 
     async def chat_completion(
         self,
-        messages: list[dict],
-        tools: list[dict],
+        messages: list[NormalizedMessage],
+        tools: list[ToolSchema],
         stream: bool = True,
     ) -> AsyncGenerator[NormalizedResponse, None]:
+        openai_messages = self._convert_to_openai_messages(messages)
+        openai_tools = self.format_tools(tools) if tools else None
+
         try:
             response = await self.client.chat.completions.create(
                 model=settings.openai_model,
-                messages=messages,
-                tools=tools if tools else None,
+                messages=openai_messages,
+                tools=openai_tools,
                 stream=True,
                 stream_options={"include_usage": True},
             )

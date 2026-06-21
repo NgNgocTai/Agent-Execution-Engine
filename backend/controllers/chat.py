@@ -126,11 +126,12 @@ async def chat(req: ChatRequest):
                     for msg in messages_to_save:
                         await repo.add_message(
                             conversation.id,
-                            role=msg["role"],
-                            content=msg.get("content"),
-                            tool_calls=msg.get("tool_calls"),
-                            tool_call_id=msg.get("tool_call_id"),
-                            name=msg.get("name"),
+                            role=msg.role,
+                            content=msg.content,
+                            tool_calls=[tc.model_dump() for tc in msg.tool_calls] if msg.tool_calls else None,
+                            tool_call_id=msg.tool_call_id,
+                            name=msg.tool_name,
+                            is_error=msg.is_error,
                         )
                     yield f'data: {{"type":"conversation_id","data":{{"conversation_id":"{conversation.id}"}}}}\n\n'
 

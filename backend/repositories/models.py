@@ -31,6 +31,7 @@ class Message(Base):
     tool_calls: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_error: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
