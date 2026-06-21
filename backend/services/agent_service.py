@@ -4,7 +4,7 @@ import time
 from typing import AsyncGenerator
 
 from core.event_emitter import EventEmitter
-from core.schemas import AgentEvent, AgentEventType, NormalizedToolCall
+from core.schemas import AgentEvent, AgentEventType, NormalizedMessage, NormalizedToolCall
 from services.history import build_messages
 from services.prompts import get_system_prompt
 from services.providers.base import LLMProvider
@@ -43,7 +43,7 @@ class AgentEngine:
 
         emitter = EventEmitter(session_id)
         messages = build_messages(history, user_message, get_system_prompt())
-        tools = provider.format_tools(self.skill_registry.get_tool_schemas())
+        tools = self.skill_registry.get_tool_schemas()
 
         global_executed_tools = set()
 
@@ -114,10 +114,14 @@ class AgentEngine:
 
             if not pending_tool_calls:
                 if accumulated_text:
-                    messages.append({"role": "assistant", "content": accumulated_text})
+                    messages.append(NormalizedMessage(role="assistant", content=accumulated_text))
                 break
 
-            assistant_msg = provider.build_assistant_message_with_tools(pending_tool_calls)
+            assistant_msg = NormalizedMessage(
+                role="assistant",
+                content=accumulated_text or None,
+                tool_calls=pending_tool_calls
+            )
             messages.append(assistant_msg)
 
             for tc in pending_tool_calls:
@@ -158,10 +162,13 @@ class AgentEngine:
                     iteration=iteration,
                 )
 
-                tool_msg = provider.build_tool_result_message(
+                is_err = result.status != SkillStatus.SUCCESS
+                tool_msg = NormalizedMessage(
+                    role="tool",
                     tool_call_id=tc.call_id,
                     tool_name=tc.tool_name,
-                    result=json.dumps(result.data or result.error, ensure_ascii=False),
+                    content=json.dumps(result.data or result.error, ensure_ascii=False),
+                    is_error=is_err
                 )
                 messages.append(tool_msg)
         else:
