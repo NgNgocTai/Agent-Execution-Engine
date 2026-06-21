@@ -50,11 +50,14 @@ export default function Sidebar({ onNewChat, onLoadConversation, onDeleteConvers
     setRenameValue(currentTitle);
   };
 
-  const submitRename = (e: React.MouseEvent | React.FormEvent, id: string) => {
+  const submitRename = (e: React.SyntheticEvent, id: string) => {
     e.stopPropagation();
     e.preventDefault();
-    if (renameValue.trim()) {
-      onRenameConversation(id, renameValue.trim());
+    if (renamingId !== id) return;
+    const currentTitle = sessions.find((s) => s.id === id)?.title;
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== currentTitle) {
+      onRenameConversation(id, trimmed);
     }
     setRenamingId(null);
   };
@@ -132,21 +135,22 @@ export default function Sidebar({ onNewChat, onLoadConversation, onDeleteConvers
                   <MessageSquare size={14} className="shrink-0 text-[#727687]" />
                   <div className="flex flex-col min-w-0 pr-2 flex-1">
                     {renamingId === s.id ? (
-                      <form onSubmit={(e) => submitRename(e, s.id)} className="flex items-center gap-1">
+                      <form onSubmit={(e) => submitRename(e, s.id)} className="flex items-center gap-1 w-full">
                         <input
                           type="text"
                           autoFocus
                           value={renameValue}
                           onChange={(e) => setRenameValue(e.target.value)}
+                          onBlur={(e) => submitRename(e, s.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") {
+                              e.stopPropagation();
+                              setRenamingId(null);
+                            }
+                          }}
                           onClick={(e) => e.stopPropagation()}
                           className="w-full text-sm font-bold bg-white border border-[#0050cb] rounded px-1 py-0.5 outline-none text-[#1a1c1c]"
                         />
-                        <button type="submit" onClick={(e) => submitRename(e, s.id)} className="p-1 text-green-600 hover:bg-green-100 rounded">
-                          <Check size={12} />
-                        </button>
-                        <button type="button" onClick={cancelRename} className="p-1 text-red-600 hover:bg-red-100 rounded">
-                          <XIcon size={12} />
-                        </button>
                       </form>
                     ) : (
                       <>
