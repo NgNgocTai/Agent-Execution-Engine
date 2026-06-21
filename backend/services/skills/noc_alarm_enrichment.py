@@ -127,7 +127,7 @@ class NocAlarmEnrichmentSkill(BaseSkill):
                 error="Thiếu tham số bắt buộc: alarm_type. Vui lòng cung cấp loại cảnh báo (vd: LINK_DOWN, BGP_SESSION_DOWN).",
             )
 
-        alarm_type = alarm_type.strip().upper()
+        alarm_type = alarm_type.strip().upper().replace("_", " ")
 
         error_info = await self.device_repo.get_error_by_name(alarm_type)
         if not error_info:
