@@ -1,4 +1,6 @@
 import logging
+import shlex
+from datetime import datetime, timezone
 
 import paramiko
 
@@ -27,6 +29,9 @@ METRICS_SCRIPT = (
     "print(json.dumps({\"mem_pct\":mem_pct,\"cpu_pct\":cpu_pct,\"load1\":load1,\"disk_pct\":disk_pct}))"
     "'"
 )
+
+# Giới hạn an toàn cho log_lines để tránh ai đó truyền số khổng lồ làm tràn context
+MAX_LOG_LINES = 1000
 
 
 class NodeHealthRemediateSkill(BaseSkill):
@@ -68,6 +73,11 @@ class NodeHealthRemediateSkill(BaseSkill):
                     "description": "Tên container docker (cần cho nhánh đọc log & restart service)",
                     "default": "",
                 },
+                "log_lines": {
+                    "type": "integer",
+                    "description": f"Số dòng log lấy về khi đọc log container. Mặc định 200, tối đa {MAX_LOG_LINES}.",
+                    "default": 200,
+                },
                 "dry_run": {
                     "type": "boolean",
                     "description": "CẢNH BÁO QUAN TRỌNG: LUÔN LUÔN đặt dry_run = True. TUYỆT ĐỐI KHÔNG ĐƯỢC set bằng False khi chưa được người dùng yêu cầu rõ ràng. True = chỉ in lệnh (An toàn), False = thực thi thật (Nguy hiểm).",
@@ -77,7 +87,9 @@ class NodeHealthRemediateSkill(BaseSkill):
             "required": ["host"],
         }
 
-    def _ssh_exec(self, host: str, command: str) -> tuple[int, str]:
+    def _ssh_exec(self, host: str, command: str) -> tuple[int, str, str]:
+        """Trả về (exit_code, stdout, stderr) — tách riêng để caller tự quyết định
+        cách xử lý/hiển thị, không gộp lẫn vào nhau."""
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
@@ -92,18 +104,18 @@ class NodeHealthRemediateSkill(BaseSkill):
             )
             _, stdout, stderr = client.exec_command(command, timeout=15)
             exit_code = stdout.channel.recv_exit_status()
-            output = stdout.read().decode("utf-8", errors="replace").strip()
+            out = stdout.read().decode("utf-8", errors="replace").strip()
             err = stderr.read().decode("utf-8", errors="replace").strip()
             if err:
                 logger.warning("SSH stderr [%s]: %s", host, err)
-            return exit_code, output
+            return exit_code, out, err
         finally:
             client.close()
 
     def _get_metrics(self, host: str) -> dict:
         import json
 
-        _, output = self._ssh_exec(host, METRICS_SCRIPT)
+        _, output, _ = self._ssh_exec(host, METRICS_SCRIPT)
         return json.loads(output)
 
     async def execute(
@@ -112,9 +124,15 @@ class NodeHealthRemediateSkill(BaseSkill):
         ram_threshold: int = 80,
         cpu_threshold: int = 80,
         service: str = "",
+        log_lines: int = 200,
         dry_run: bool = True,
         **kwargs,
     ) -> SkillResult:
+        # Chặn log_lines bất thường (LLM hoặc người dùng truyền số quá lớn)
+        if log_lines <= 0:
+            log_lines = 200
+        log_lines = min(log_lines, MAX_LOG_LINES)
+
         try:
             metrics = self._get_metrics(host)
         except paramiko.AuthenticationException:
@@ -139,6 +157,10 @@ class NodeHealthRemediateSkill(BaseSkill):
         ram_high = metrics["mem_pct"] > ram_threshold
         cpu_high = metrics["cpu_pct"] > cpu_threshold
 
+        # service luôn được quote an toàn trước khi ghép vào lệnh shell,
+        # tránh command injection nếu service chứa ký tự đặc biệt (;, $(), |, ...)
+        safe_service = shlex.quote(service) if service else ""
+
         if ram_high and cpu_high:
             action = "restart_docker"
             command = "sudo -n systemctl restart docker"
@@ -150,7 +172,7 @@ class NodeHealthRemediateSkill(BaseSkill):
                     error="Action 'read_logs' requires 'service' parameter (docker container name). Please ask the user.",
                 )
             action = "read_logs"
-            command = f"docker logs --timestamps --tail 200 {service}"
+            command = f"docker logs --timestamps --tail {log_lines} {safe_service}"
         elif not ram_high and cpu_high:
             if not service:
                 return SkillResult(
@@ -159,25 +181,33 @@ class NodeHealthRemediateSkill(BaseSkill):
                     error="Action 'restart_service' requires 'service' parameter (docker container name). Please ask the user.",
                 )
             action = "restart_service"
-            command = f"docker restart {service}"
+            command = f"docker restart {safe_service}"
         else:
             action = "none"
             command = None
 
         executed = False
-        execution_output = None
+        exit_code = None
+        stdout_text = None
+        stderr_text = None
+        command_succeeded = None  # None = chưa chạy; True/False = đã chạy, dựa theo exit_code
 
         if command and not dry_run:
             try:
-                exit_code, output = self._ssh_exec(host, command)
+                exit_code, stdout_text, stderr_text = self._ssh_exec(host, command)
                 executed = True
-                execution_output = output
+                # executed=True chỉ nghĩa là SSH chạy được lệnh (không exception Python).
+                # command_succeeded phản ánh đúng kết quả của LỆNH TRÊN NODE (exit_code).
+                command_succeeded = (exit_code == 0)
             except Exception as e:
-                execution_output = f"Error executing command: {e}"
+                stderr_text = f"Error executing command: {e}"
+                command_succeeded = False
 
         evaluation = {
             "ram_high": ram_high,
             "cpu_high": cpu_high,
+        }
+        thresholds = {
             "ram_threshold": ram_threshold,
             "cpu_threshold": cpu_threshold,
         }
@@ -185,13 +215,18 @@ class NodeHealthRemediateSkill(BaseSkill):
         return SkillResult(
             status=SkillStatus.SUCCESS,
             data={
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "host": host,
                 "metrics": metrics,
+                "thresholds": thresholds,
                 "evaluation": evaluation,
                 "action": action,
                 "command": command,
                 "dry_run": dry_run,
                 "executed": executed,
-                "execution_output": execution_output,
+                "command_succeeded": command_succeeded,
+                "exit_code": exit_code,
+                "stdout": stdout_text,
+                "stderr": stderr_text,
             },
         )
