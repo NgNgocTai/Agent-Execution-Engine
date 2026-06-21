@@ -41,6 +41,18 @@ export default function ChatLayout() {
     }
   };
 
+  const handleRenameConversation = async (id: string, title: string) => {
+    try {
+      const { renameConversation } = await import("../lib/api");
+      const success = await renameConversation(id, title);
+      if (success) {
+        refreshConversations();
+      }
+    } catch (e) {
+      console.error("Failed to rename conversation", e);
+    }
+  };
+
   useEffect(() => {
     refreshConversations();
   }, []);
@@ -68,6 +80,7 @@ export default function ChatLayout() {
         onNewChat={newChat}
         onLoadConversation={loadConversation}
         onDeleteConversation={handleDeleteConversation}
+        onRenameConversation={handleRenameConversation}
         sessions={conversations}
         activeConversationId={conversationId}
       />

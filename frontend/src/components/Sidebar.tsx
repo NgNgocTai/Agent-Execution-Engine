@@ -1,20 +1,38 @@
-import { Plus, Network, MessageSquare, Trash2, X } from "lucide-react";
+import { Plus, Network, MessageSquare, Trash2, MoreHorizontal, PenLine, Check, X as XIcon } from "lucide-react";
 import type { ConversationEntry } from "../lib/api";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 
 interface Props {
   onNewChat: () => void;
   onLoadConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
+  onRenameConversation: (id: string, title: string) => void;
   sessions: ConversationEntry[];
   activeConversationId: string | null;
 }
 
-export default function Sidebar({ onNewChat, onLoadConversation, onDeleteConversation, sessions, activeConversationId }: Props) {
+export default function Sidebar({ onNewChat, onLoadConversation, onDeleteConversation, onRenameConversation, sessions, activeConversationId }: Props) {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpenId(null);
+      }
+    };
+    if (menuOpenId) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpenId]);
 
   const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    setMenuOpenId(null);
     setDeleteConfirmId(id);
   };
 
@@ -23,6 +41,27 @@ export default function Sidebar({ onNewChat, onLoadConversation, onDeleteConvers
       onDeleteConversation(deleteConfirmId);
       setDeleteConfirmId(null);
     }
+  };
+
+  const startRename = (e: React.MouseEvent, id: string, currentTitle: string) => {
+    e.stopPropagation();
+    setMenuOpenId(null);
+    setRenamingId(id);
+    setRenameValue(currentTitle);
+  };
+
+  const submitRename = (e: React.MouseEvent | React.FormEvent, id: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (renameValue.trim()) {
+      onRenameConversation(id, renameValue.trim());
+    }
+    setRenamingId(null);
+  };
+
+  const cancelRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingId(null);
   };
 
   return (
@@ -81,27 +120,80 @@ export default function Sidebar({ onNewChat, onLoadConversation, onDeleteConvers
               {sessions.map((s) => (
                 <div
                   key={s.id}
-                  className={`group flex items-center gap-2 w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
+                  className={`group relative flex items-center gap-2 w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
                     s.id === activeConversationId
                       ? "bg-[#e8effd] text-[#0050cb]"
                       : "text-[#424656] hover:text-[#1a1c1c] hover:bg-[#f3f3f4]"
                   }`}
-                  onClick={() => onLoadConversation(s.id)}
+                  onClick={() => {
+                    if (renamingId !== s.id) onLoadConversation(s.id);
+                  }}
                 >
                   <MessageSquare size={14} className="shrink-0 text-[#727687]" />
                   <div className="flex flex-col min-w-0 pr-2 flex-1">
-                    <span className="text-sm font-bold truncate">{s.title}</span>
-                    <span className="text-[10px] text-[#727687] mt-0.5">
-                      {s.provider}
-                    </span>
+                    {renamingId === s.id ? (
+                      <form onSubmit={(e) => submitRename(e, s.id)} className="flex items-center gap-1">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full text-sm font-bold bg-white border border-[#0050cb] rounded px-1 py-0.5 outline-none text-[#1a1c1c]"
+                        />
+                        <button type="submit" onClick={(e) => submitRename(e, s.id)} className="p-1 text-green-600 hover:bg-green-100 rounded">
+                          <Check size={12} />
+                        </button>
+                        <button type="button" onClick={cancelRename} className="p-1 text-red-600 hover:bg-red-100 rounded">
+                          <XIcon size={12} />
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <span className="text-sm font-bold truncate">{s.title}</span>
+                        <span className="text-[10px] text-[#727687] mt-0.5">{s.provider}</span>
+                      </>
+                    )}
                   </div>
-                  <button
-                    onClick={(e) => handleDelete(e, s.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
-                    title="Xóa chat"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {renamingId !== s.id && (
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpenId(menuOpenId === s.id ? null : s.id);
+                        }}
+                        className={`p-1.5 rounded transition-all ${
+                          menuOpenId === s.id
+                            ? "opacity-100 bg-[#e2e2e5] text-[#1a1c1c]"
+                            : "opacity-0 group-hover:opacity-100 text-[#727687] hover:text-[#1a1c1c] hover:bg-[#e2e2e5]"
+                        }`}
+                      >
+                        <MoreHorizontal size={16} />
+                      </button>
+
+                      {menuOpenId === s.id && (
+                        <div
+                          ref={menuRef}
+                          className="absolute right-0 top-8 w-32 bg-white rounded-lg shadow-lg border border-[#e2e2e2] py-1 z-50 overflow-hidden"
+                        >
+                          <button
+                            onClick={(e) => startRename(e, s.id, s.title)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#424656] hover:bg-[#f3f3f4] hover:text-[#1a1c1c] transition-colors"
+                          >
+                            <PenLine size={14} />
+                            Rename
+                          </button>
+                          <button
+                            onClick={(e) => handleDelete(e, s.id)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
