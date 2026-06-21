@@ -36,6 +36,15 @@ class NormalizedToolCall(BaseModel):
     arguments: dict
 
 
+class NormalizedMessage(BaseModel):
+    role: str
+    content: str | None = None
+    tool_calls: list[NormalizedToolCall] | None = None
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    is_error: bool = False
+
+
 class NormalizedResponse(BaseModel):
     tool_calls: list[NormalizedToolCall] = []
     text_content: str | None = None
