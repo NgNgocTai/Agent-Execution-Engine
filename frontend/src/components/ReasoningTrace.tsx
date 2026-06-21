@@ -26,10 +26,10 @@ export default function ReasoningTrace({ message, messageIndex, onToggleTab }: P
           {message.thinkingBlocks.map((block, i) => (
             <div key={`think-${messageIndex}-${i}`} className="relative group">
               <div className="absolute left-0 w-7 h-7 flex items-center justify-center z-10">
-                <div className="w-2 h-2 rounded-full bg-[#8b5cf6] animate-pulse" />
+                <div className={`w-2 h-2 rounded-full bg-[#8b5cf6] ${message.isStreaming ? "animate-pulse" : ""}`} />
               </div>
               <div className="ml-10">
-                <ThinkingBlock blocks={[block]} />
+                <ThinkingBlock blocks={[block]} isStreaming={message.isStreaming} />
               </div>
             </div>
           ))}

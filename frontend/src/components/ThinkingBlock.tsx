@@ -3,9 +3,10 @@ import type { ThinkingBlock as ThinkingBlockType } from "../types";
 
 interface Props {
   blocks: ThinkingBlockType[];
+  isStreaming?: boolean;
 }
 
-export default function ThinkingBlock({ blocks }: Props) {
+export default function ThinkingBlock({ blocks, isStreaming = false }: Props) {
   if (blocks.length === 0) return null;
 
   return (
@@ -20,12 +21,14 @@ export default function ThinkingBlock({ blocks }: Props) {
               />
             </div>
             <div className="flex items-center gap-2">
-              <span>🧠 Đang suy nghĩ...</span>
-              <span className="flex gap-1 ml-1">
-                <span className="w-1 h-1 bg-[#0050cb] rounded-full animate-pulse"></span>
-                <span className="w-1 h-1 bg-[#0050cb] rounded-full animate-pulse delay-75"></span>
-                <span className="w-1 h-1 bg-[#0050cb] rounded-full animate-pulse delay-150"></span>
-              </span>
+              <span>{isStreaming ? "🧠 Đang suy nghĩ..." : "🧠 Quá trình suy luận"}</span>
+              {isStreaming && (
+                <span className="flex gap-1 ml-1">
+                  <span className="w-1 h-1 bg-[#0050cb] rounded-full animate-pulse"></span>
+                  <span className="w-1 h-1 bg-[#0050cb] rounded-full animate-pulse delay-75"></span>
+                  <span className="w-1 h-1 bg-[#0050cb] rounded-full animate-pulse delay-150"></span>
+                </span>
+              )}
             </div>
           </summary>
           <div className="mt-3 pl-10 text-sm text-[#424656] italic space-y-1 font-sans">
