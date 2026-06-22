@@ -1,5 +1,15 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+
+const schema = {
+  ...defaultSchema,
+  tagNames: [
+    ...(defaultSchema.tagNames || []), 
+    'br', 'details', 'summary', 'kbd', 'mark', 'u', 'sub', 'sup'
+  ],
+};
 
 interface Props {
   content: string;
@@ -14,6 +24,7 @@ export default function TextResponse({ content, isStreaming }: Props) {
       <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeRaw, [rehypeSanitize, schema]]}
           components={{
             table: ({ ...props }) => (
               <div className="overflow-x-auto my-6 rounded-xl border border-[#e2e8f0] shadow-sm">
