@@ -15,7 +15,15 @@ export default function ChatLayout() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevContentLen = useRef(0);
+  const prevMessageCount = useRef(0);
+  const isAutoScrollEnabled = useRef(true);
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
+
+  const handleScroll = () => {
+    if (!scrollContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+    isAutoScrollEnabled.current = scrollHeight - scrollTop - clientHeight < 150;
+  };
 
   const refreshConversations = async () => {
     try {
@@ -62,10 +70,14 @@ export default function ChatLayout() {
       (sum, m) => sum + m.textContent.length + m.content.length + m.toolCallCards.length * 10,
       0,
     );
+    const isNewMessage = messages.length > prevMessageCount.current;
     if (totalLen > prevContentLen.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      if (isNewMessage || isAutoScrollEnabled.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: isNewMessage ? "smooth" : "auto" });
+      }
     }
     prevContentLen.current = totalLen;
+    prevMessageCount.current = messages.length;
   }, [messages]);
 
   useEffect(() => {
@@ -91,7 +103,7 @@ export default function ChatLayout() {
           conversationId={conversationId}
         />
 
-        <main ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 py-6">
+        <main ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-6">
           <div className="max-w-[800px] mx-auto space-y-8">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-[60vh] text-center">
