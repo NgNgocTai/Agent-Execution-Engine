@@ -155,7 +155,6 @@ export default function Sidebar({ onNewChat, onLoadConversation, onDeleteConvers
                     ) : (
                       <>
                         <span className="text-sm font-bold truncate">{s.title}</span>
-                        <span className="text-[10px] text-[#727687] mt-0.5">{s.provider}</span>
                       </>
                     )}
                   </div>
