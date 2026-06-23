@@ -330,9 +330,8 @@ export function useChat() {
   const switchProvider = useCallback(
     (provider: string) => {
       setCurrentProvider(provider);
-      newChat();
     },
-    [newChat],
+    [],
   );
 
   return {
