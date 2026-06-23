@@ -23,6 +23,18 @@ class ChatRequest(BaseModel):
     provider: str = "mock"
     conversation_id: str | None = None
 
+class RenameRequest(BaseModel):
+    title: str
+
+@router.put("/conversations/{conversation_id}/title")
+async def rename_conversation(conversation_id: str, req: RenameRequest):
+    async with async_session() as session:
+        repo = ConversationRepository(session)
+        success = await repo.rename(conversation_id, req.title)
+        if not success:
+            return {"error": "Conversation not found"}
+        return {"success": True}
+
 
 engine: AgentEngine | None = None
 

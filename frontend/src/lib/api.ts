@@ -39,6 +39,15 @@ export async function deleteConversation(conversationId: string): Promise<boolea
   return data.success;
 }
 
+export async function renameConversation(conversationId: string, title: string): Promise<boolean> {
+  const data = await fetch(`${API_BASE}/conversations/${conversationId}/title`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  }).then((r) => r.json());
+  return data.success;
+}
+
 export interface ConversationMessages {
   conversation_id: string;
   provider: string;
