@@ -7,7 +7,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Settings(BaseSettings):
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "openai/gpt-oss-120b:free"
     openai_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_api_key: str = ""
     anthropic_model: str = "anthropic/claude-3-haiku"
