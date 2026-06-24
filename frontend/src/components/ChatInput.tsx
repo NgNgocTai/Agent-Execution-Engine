@@ -11,6 +11,7 @@ interface Props {
 const PROVIDERS = [
   { id: "openai", label: "OpenAI", color: "#0050cb" },
   { id: "anthropic", label: "Anthropic", color: "#d97706" },
+  { id: "deepseek", label: "DeepSeek", color: "#4f46e5" },
 ];
 
 export default function ChatInput({ onSend, isStreaming, currentProvider, onSwitchProvider }: Props) {

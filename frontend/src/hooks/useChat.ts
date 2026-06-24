@@ -70,13 +70,18 @@ export function useChat() {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
                   const updated = [...prev];
-                  updated[last] = {
-                    ...updated[last],
-                    thinkingBlocks: [
-                      ...updated[last].thinkingBlocks,
-                      { content: edata.content, isExpanded: true },
-                    ],
-                  };
+                  const blocks = [...updated[last].thinkingBlocks];
+                  if (blocks.length > 0) {
+                    // Append vào thinking block cuối cùng (streaming dần)
+                    blocks[blocks.length - 1] = {
+                      ...blocks[blocks.length - 1],
+                      content: blocks[blocks.length - 1].content + (edata.content || ""),
+                    };
+                  } else {
+                    // Tạo thinking block mới
+                    blocks.push({ content: edata.content || "", isExpanded: true });
+                  }
+                  updated[last] = { ...updated[last], thinkingBlocks: blocks };
                   return updated;
                 });
               }
