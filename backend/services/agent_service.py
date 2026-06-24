@@ -95,6 +95,9 @@ class AgentEngine:
                     # Streaming ngay lập tức để UI mượt mà, không chờ gom hết
                     yield emitter.text_delta(response.text_content)
 
+                if response.thinking_content:
+                    yield emitter.thinking(content=response.thinking_content, iteration=iteration)
+
             # --- Langfuse: Kết thúc LLM Call, ghi output ---
             if gen_ctx:
                 gen_ctx.end(

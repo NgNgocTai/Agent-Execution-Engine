@@ -48,5 +48,6 @@ class NormalizedMessage(BaseModel):
 class NormalizedResponse(BaseModel):
     tool_calls: list[NormalizedToolCall] = []
     text_content: str | None = None
+    thinking_content: str | None = None
     stop_reason: str = ""
     token_usage: dict | None = None

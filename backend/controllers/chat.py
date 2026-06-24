@@ -12,6 +12,7 @@ from services.providers.anthropic_provider import AnthropicProvider
 from services.providers.base import LLMProvider
 from services.providers.mock_provider import MockProvider
 from services.providers.openai_provider import OpenAIProvider
+from services.providers.deepseek_provider import DeepSeekProvider
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,13 @@ def _get_provider(name: str) -> LLMProvider:
         "mock": MockProvider,
         "openai": OpenAIProvider,
         "anthropic": AnthropicProvider,
+        "deepseek": DeepSeekProvider,
     }
     cls = providers.get(name, MockProvider)
     return cls()
 
 
-AVAILABLE_PROVIDERS = ["openai", "anthropic"]
+AVAILABLE_PROVIDERS = ["openai", "anthropic", "deepseek"]
 
 
 @router.get("/config")
