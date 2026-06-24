@@ -10,6 +10,8 @@ from repositories.postgres_repo import DeviceRepository
 from services.agent_service import AgentEngine
 from services.skills.noc_alarm_enrichment import NocAlarmEnrichmentSkill
 from services.skills.node_health_remediate import NodeHealthRemediateSkill
+from services.skills.alarm_statistics import AlarmStatisticsSkill
+from services.skills.device_inventory_lookup import DeviceInventoryLookupSkill
 from services.skills.registry import SkillRegistry
 from services.tool_executor import ToolExecutor
 from tracing.langfuse_tracer import LangfuseTracer
@@ -43,6 +45,8 @@ async def startup():
     registry = SkillRegistry()
     registry.register(NocAlarmEnrichmentSkill(alarm_repo, device_repo))
     registry.register(NodeHealthRemediateSkill())
+    registry.register(AlarmStatisticsSkill(alarm_repo, device_repo))
+    registry.register(DeviceInventoryLookupSkill(alarm_repo, device_repo))
 
     tool_executor = ToolExecutor(registry)
 

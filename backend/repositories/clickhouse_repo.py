@@ -66,5 +66,53 @@ class AlarmRepository:
             logger.error("ClickHouse query error: %s", e)
             return [], 0
 
+    def count_alarms(self, where_clause: str, params: dict) -> int:
+        query = f"SELECT count(*) FROM alarm WHERE {where_clause}"
+        try:
+            result = self.client.query(query, parameters=params)
+            return result.result_rows[0][0]
+        except Exception as e:
+            logger.error("ClickHouse count error: %s", e)
+            return 0
+
+    def group_alarms(
+        self, group_col: str, where_clause: str, params: dict, limit: int = 0
+    ) -> list[dict]:
+        query = f"SELECT {group_col}, count(*) as cnt FROM alarm WHERE {where_clause} GROUP BY {group_col} ORDER BY cnt DESC"
+        if limit > 0:
+            query += f" LIMIT {limit}"
+        try:
+            result = self.client.query(query, parameters=params)
+            return [{"key": row[0], "count": row[1]} for row in result.result_rows]
+        except Exception as e:
+            logger.error("ClickHouse group error: %s", e)
+            return []
+
+    def get_active_alarms_by_device(self, device_id: str, limit: int = 20) -> list[dict]:
+        query = """
+            SELECT alarm_id, error_code, severity, time_created, status
+            FROM alarm
+            WHERE device_id = %(device_id)s AND status = 'active'
+            ORDER BY time_created DESC
+            LIMIT %(limit)s
+        """
+        try:
+            result = self.client.query(
+                query, parameters={"device_id": device_id, "limit": limit}
+            )
+            return [
+                {
+                    "alarm_id": row[0],
+                    "error_code": row[1],
+                    "severity": row[2],
+                    "time_created": str(row[3]),
+                    "status": row[4],
+                }
+                for row in result.result_rows
+            ]
+        except Exception as e:
+            logger.error("ClickHouse active alarms error: %s", e)
+            return []
+
     def close(self) -> None:
         self.client.close()

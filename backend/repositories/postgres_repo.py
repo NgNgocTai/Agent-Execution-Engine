@@ -33,6 +33,23 @@ class DeviceRepository:
             return dict(row)
         return None
 
+    async def get_error_by_code(self, error_code: str) -> dict | None:
+        row = await self._pool.fetchrow(
+            "SELECT error_code, name, description, domain, default_severity "
+            "FROM error WHERE error_code = $1",
+            error_code,
+        )
+        if row:
+            return dict(row)
+        return None
+
+    async def get_errors_by_domain(self, domain: str) -> list[dict]:
+        rows = await self._pool.fetch(
+            "SELECT error_code, name FROM error WHERE LOWER(domain) = LOWER($1)",
+            domain,
+        )
+        return [dict(r) for r in rows]
+
     async def get_device_with_details(self, device_id: str | None = None, device_name: str | None = None) -> dict | None:
         if device_id:
             row = await self._pool.fetchrow(
