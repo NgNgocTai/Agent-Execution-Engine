@@ -142,6 +142,7 @@ class AnthropicProvider(LLMProvider):
                 tools=openai_tools,
                 stream=True,
                 stream_options={"include_usage": True},
+                extra_body={"reasoning": {"effort": "high"}},
             )
         except Exception as e:
             logger.error("LLM API error: %s", e)
@@ -163,6 +164,10 @@ class AnthropicProvider(LLMProvider):
                             tool_call_buffers[idx]["name"] += tc_delta.function.name
                         if tc_delta.function.arguments:
                             tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
+            reasoning = getattr(delta, "reasoning", None)
+            if reasoning:
+                yield NormalizedResponse(thinking_content=reasoning)
+                continue
             if delta.content:
                 yield NormalizedResponse(text_content=delta.content, stop_reason="")
             finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
