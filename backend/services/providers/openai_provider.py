@@ -113,6 +113,11 @@ class OpenAIProvider(LLMProvider):
                         if tc_delta.function.arguments:
                             tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
 
+            reasoning = getattr(delta, "reasoning", None)
+            if reasoning:
+                yield NormalizedResponse(thinking_content=reasoning)
+                continue
+
             if delta.content:
                 yield NormalizedResponse(
                     text_content=delta.content,
