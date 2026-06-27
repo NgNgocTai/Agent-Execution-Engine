@@ -1,25 +1,27 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, ChevronDown } from "lucide-react";
+import type { ProviderOption } from "../types";
 
 interface Props {
   onSend: (message: string) => void;
   isStreaming: boolean;
   currentProvider: string;
   onSwitchProvider: (provider: string) => void;
+  providers: ProviderOption[];
 }
 
-const PROVIDERS = [
-  { id: "openai", label: "OpenAI", color: "#0050cb" },
-  { id: "anthropic", label: "Anthropic", color: "#d97706" },
-  { id: "deepseek", label: "DeepSeek", color: "#4f46e5" },
-];
+const FALLBACK_PROVIDER: ProviderOption = {
+  id: "openai",
+  label: "OpenAI",
+  color: "#0050cb",
+};
 
-export default function ChatInput({ onSend, isStreaming, currentProvider, onSwitchProvider }: Props) {
+export default function ChatInput({ onSend, isStreaming, currentProvider, onSwitchProvider, providers }: Props) {
   const [message, setMessage] = useState("");
   const [showProviders, setShowProviders] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const provider = PROVIDERS.find((p) => p.id === currentProvider) || PROVIDERS[0];
+  const provider = providers.find((p) => p.id === currentProvider) || providers[0] || FALLBACK_PROVIDER;
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -67,7 +69,7 @@ export default function ChatInput({ onSend, isStreaming, currentProvider, onSwit
             </button>
             {showProviders && (
               <div className="absolute bottom-full right-0 mb-2 bg-white border border-[#e2e2e2] rounded-lg shadow-lg overflow-hidden min-w-[140px]">
-                {PROVIDERS.map((p) => (
+                {providers.map((p) => (
                   <button
                     key={p.id}
                     onClick={() => {

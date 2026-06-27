@@ -5,7 +5,31 @@ import Header from "./Header";
 import ReasoningTrace from "./ReasoningTrace";
 import ChatInput from "./ChatInput";
 import { useChat } from "../hooks/useChat";
-import { getConversations, type ConversationEntry } from "../lib/api";
+import { getConfig, getConversations, type ConversationEntry } from "../lib/api";
+import type { ProviderOption } from "../types";
+
+const PROVIDER_META: Record<string, ProviderOption> = {
+  openai: { id: "openai", label: "OpenAI", color: "#0050cb" },
+  anthropic: { id: "anthropic", label: "Anthropic", color: "#d97706" },
+  deepseek: { id: "deepseek", label: "DeepSeek", color: "#4f46e5" },
+  mock: { id: "mock", label: "Mock", color: "#64748b" },
+};
+
+const DEFAULT_PROVIDERS = ["openai", "anthropic", "deepseek"].map(
+  (id) => PROVIDER_META[id],
+);
+
+function toProviderOption(id: string): ProviderOption {
+  return PROVIDER_META[id] || {
+    id,
+    label: id
+      .split(/[-_]/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" "),
+    color: "#64748b",
+  };
+}
 
 export default function ChatLayout() {
   const {
@@ -18,6 +42,7 @@ export default function ChatLayout() {
   const prevMessageCount = useRef(0);
   const isAutoScrollEnabled = useRef(true);
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
+  const [providers, setProviders] = useState<ProviderOption[]>(DEFAULT_PROVIDERS);
 
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
@@ -66,6 +91,27 @@ export default function ChatLayout() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    getConfig()
+      .then((config) => {
+        if (cancelled || !config.providers.length) return;
+        const nextProviders = config.providers.map(toProviderOption);
+        setProviders(nextProviders);
+        if (!config.providers.includes(currentProvider)) {
+          switchProvider(config.providers[0]);
+        }
+      })
+      .catch(() => {
+        // keep defaults
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProvider, switchProvider]);
+
+  useEffect(() => {
     const totalLen = messages.reduce(
       (sum, m) => sum + m.textContent.length + m.content.length + m.toolCallCards.length * 10,
       0,
@@ -101,6 +147,7 @@ export default function ChatLayout() {
           currentProvider={currentProvider}
           onSwitchProvider={switchProvider}
           conversationId={conversationId}
+          providers={providers}
         />
 
         <main ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-6">
@@ -160,6 +207,7 @@ export default function ChatLayout() {
           isStreaming={isStreaming}
           currentProvider={currentProvider}
           onSwitchProvider={switchProvider}
+          providers={providers}
         />
       </div>
     </div>

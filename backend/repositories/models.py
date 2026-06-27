@@ -29,6 +29,7 @@ class Message(Base):
     )
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    thinking_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_calls: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     name: Mapped[str | None] = mapped_column(String(100), nullable=True)

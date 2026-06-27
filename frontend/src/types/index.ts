@@ -32,6 +32,12 @@ export interface ThinkingBlock {
   isExpanded: boolean;
 }
 
+export interface ProviderOption {
+  id: string;
+  label: string;
+  color: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;

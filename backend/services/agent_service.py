@@ -59,6 +59,7 @@ class AgentEngine:
             iteration += 1
             pending_tool_calls: list[NormalizedToolCall] = []
             accumulated_text = ""
+            accumulated_thinking = ""
 
             # --- Langfuse: Bắt đầu ghi nhận LLM Call ---
             model_name = getattr(provider, "model_name", "unknown")
@@ -96,6 +97,7 @@ class AgentEngine:
                     yield emitter.text_delta(response.text_content)
 
                 if response.thinking_content:
+                    accumulated_thinking += response.thinking_content
                     yield emitter.thinking(content=response.thinking_content, iteration=iteration)
 
             # --- Langfuse: Kết thúc LLM Call, ghi output ---
@@ -111,18 +113,27 @@ class AgentEngine:
 
             # Nếu có tool calls mà LLM lười không giải thích -> Tự động tạo reasoning
             if pending_tool_calls:
-                if not accumulated_text:
+                if not accumulated_text and not accumulated_thinking:
                     tool_names = ", ".join(tc.tool_name for tc in pending_tool_calls)
-                    yield emitter.thinking(content=f"Tiến hành gọi công cụ: {tool_names}...", iteration=iteration)
+                    fallback_thinking = f"Tiến hành gọi công cụ: {tool_names}..."
+                    accumulated_thinking += fallback_thinking
+                    yield emitter.thinking(content=fallback_thinking, iteration=iteration)
 
             if not pending_tool_calls:
-                if accumulated_text:
-                    messages.append(NormalizedMessage(role="assistant", content=accumulated_text))
+                if accumulated_text or accumulated_thinking:
+                    messages.append(
+                        NormalizedMessage(
+                            role="assistant",
+                            content=accumulated_text or None,
+                            thinking_content=accumulated_thinking or None,
+                        )
+                    )
                 break
 
             assistant_msg = NormalizedMessage(
                 role="assistant",
                 content=accumulated_text or None,
+                thinking_content=accumulated_thinking or None,
                 tool_calls=pending_tool_calls
             )
             messages.append(assistant_msg)

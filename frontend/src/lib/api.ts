@@ -4,10 +4,12 @@ export async function sendMessage(
   message: string,
   provider: string,
   conversationId: string | null,
+  signal?: AbortSignal,
 ): Promise<Response> {
   return fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal,
     body: JSON.stringify({
       message,
       provider,
@@ -54,6 +56,7 @@ export interface ConversationMessages {
   messages: Array<{
     role: string;
     content?: string;
+    thinking_content?: string;
     tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
     tool_call_id?: string;
     name?: string;
