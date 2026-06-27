@@ -5,7 +5,13 @@ import Header from "./Header";
 import ReasoningTrace from "./ReasoningTrace";
 import ChatInput from "./ChatInput";
 import { useChat } from "../hooks/useChat";
-import { getConfig, getConversations, type ConversationEntry } from "../lib/api";
+import {
+  deleteConversation,
+  getConfig,
+  getConversations,
+  renameConversation,
+  type ConversationEntry,
+} from "../lib/api";
 import type { ProviderOption } from "../types";
 
 const PROVIDER_META: Record<string, ProviderOption> = {
@@ -61,7 +67,6 @@ export default function ChatLayout() {
 
   const handleDeleteConversation = async (id: string) => {
     try {
-      const { deleteConversation } = await import("../lib/api");
       const success = await deleteConversation(id);
       if (success) {
         if (id === conversationId) {
@@ -76,7 +81,6 @@ export default function ChatLayout() {
 
   const handleRenameConversation = async (id: string, title: string) => {
     try {
-      const { renameConversation } = await import("../lib/api");
       const success = await renameConversation(id, title);
       if (success) {
         refreshConversations();
