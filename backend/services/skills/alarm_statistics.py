@@ -1,9 +1,15 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
 
 logger = logging.getLogger(__name__)
+
+GROUP_BY_COLUMNS = {
+    "severity": "severity",
+    "error_code": "error_code",
+    "device_id": "device_id",
+}
 
 
 class AlarmStatisticsSkill(BaseSkill):
@@ -67,7 +73,7 @@ class AlarmStatisticsSkill(BaseSkill):
         **kwargs,
     ) -> SkillResult:
         try:
-            since = datetime.utcnow() - timedelta(minutes=window_min)
+            since = datetime.now(timezone.utc) - timedelta(minutes=window_min)
 
             # Build filter conditions
             conditions = ["time_created >= %(since)s"]
@@ -76,6 +82,18 @@ class AlarmStatisticsSkill(BaseSkill):
             if severity:
                 conditions.append("severity = %(severity)s")
                 params["severity"] = severity
+
+            group_by = (group_by or "severity").strip().lower()
+            group_col = GROUP_BY_COLUMNS.get(group_by)
+            if group_col is None:
+                return SkillResult(
+                    status=SkillStatus.BUSINESS_ERROR,
+                    data=None,
+                    error=(
+                        "group_by không hợp lệ. Chỉ hỗ trợ: "
+                        f"{', '.join(GROUP_BY_COLUMNS)}"
+                    ),
+                )
 
             where_clause = " AND ".join(conditions)
 
@@ -145,10 +163,16 @@ class AlarmStatisticsSkill(BaseSkill):
             )
             archived_count = total - active_count
 
+            grouped_alarms = self.alarm_repo.group_alarms(
+                group_col, where_clause, params, limit=top_n
+            )
+
             return SkillResult(
                 status=SkillStatus.SUCCESS,
                 data={
                     "window_min": window_min,
+                    "group_by": group_by,
+                    "grouped_alarms": grouped_alarms,
                     "total_alarms": total,
                     "by_severity": by_severity,
                     "by_error_code": by_error_code,
