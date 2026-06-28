@@ -1,0 +1,79 @@
+[
+  {
+    "name": "alarm statistics groups critical alarms by device",
+    "tool_name": "alarm_statistics",
+    "arguments": {
+      "window_min": 60,
+      "severity": "Critical",
+      "group_by": "device_id",
+      "top_n": 3
+    },
+    "expected_status": "success",
+    "expected_data_keys": ["group_by", "grouped_alarms", "top_devices", "total_alarms"],
+    "expected_data": {
+      "group_by": "device_id"
+    }
+  },
+  {
+    "name": "alarm statistics rejects invalid group_by",
+    "tool_name": "alarm_statistics",
+    "arguments": {
+      "group_by": "station"
+    },
+    "expected_status": "business_error",
+    "expected_error_contains": "group_by"
+  },
+  {
+    "name": "device inventory lookup by ip succeeds",
+    "tool_name": "device_inventory_lookup",
+    "arguments": {
+      "ip_address": "10.0.0.1"
+    },
+    "expected_status": "success",
+    "expected_data_keys": ["device", "active_alarm_count"],
+    "expected_data": {
+      "active_alarm_count": 1
+    }
+  },
+  {
+    "name": "device inventory lookup requires identifier",
+    "tool_name": "device_inventory_lookup",
+    "arguments": {},
+    "expected_status": "business_error",
+    "expected_error_contains": "Cần ít nhất 1"
+  },
+  {
+    "name": "noc alarm enrichment enriches signal loss",
+    "tool_name": "noc_alarm_enrichment",
+    "arguments": {
+      "alarm_type": "Signal Loss",
+      "window_min": 60
+    },
+    "expected_status": "success",
+    "expected_data_keys": ["alarms", "total_alarms_in_db", "displayed_alarms", "error_info"]
+  },
+  {
+    "name": "noc alarm enrichment rejects unknown alarm",
+    "tool_name": "noc_alarm_enrichment",
+    "arguments": {
+      "alarm_type": "UNKNOWN_ALARM"
+    },
+    "expected_status": "business_error",
+    "expected_error_contains": "Không tìm thấy"
+  },
+  {
+    "name": "node health dry run returns metrics and no execution",
+    "tool_name": "node_health_remediate",
+    "arguments": {
+      "host": "NOC-APP-01",
+      "dry_run": true
+    },
+    "expected_status": "success",
+    "expected_data_keys": ["host", "metrics", "action", "dry_run", "executed"],
+    "expected_data": {
+      "host": "NOC-APP-01",
+      "dry_run": true,
+      "executed": false
+    }
+  }
+]

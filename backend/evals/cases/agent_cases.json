@@ -1,0 +1,112 @@
+[
+  {
+    "name": "node health status uses remediation tool",
+    "user_message": "Kiểm tra trạng thái host NOC-APP-01",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_node_health",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "dry_run": true
+        }
+      }
+    ],
+    "expected_tool_calls": [
+      {
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "dry_run": true
+        }
+      }
+    ],
+    "expected_tool_statuses": ["success"],
+    "final_text": "Host NOC-APP-01 đang ổn định: RAM 41.2%, CPU 18.5%, không cần remediation.",
+    "expected_final_contains": ["NOC-APP-01", "RAM", "CPU"]
+  },
+  {
+    "name": "critical alarm grouped by device",
+    "user_message": "Alarm Critical nhiều nhất theo thiết bị",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_alarm_stats",
+        "tool_name": "alarm_statistics",
+        "arguments": {
+          "window_min": 1440,
+          "severity": "Critical",
+          "group_by": "device_id",
+          "top_n": 10
+        }
+      }
+    ],
+    "expected_tool_calls": [
+      {
+        "tool_name": "alarm_statistics",
+        "arguments": {
+          "severity": "Critical",
+          "group_by": "device_id"
+        }
+      }
+    ],
+    "expected_tool_statuses": ["success"],
+    "final_text": "Thiết bị có nhiều alarm Critical nhất là NOC-APP-01 với 4 alarm.",
+    "expected_final_contains": ["Critical", "NOC-APP-01"]
+  },
+  {
+    "name": "inventory lookup by ip",
+    "user_message": "Tra inventory thiết bị IP 10.0.0.1",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_inventory",
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "ip_address": "10.0.0.1"
+        }
+      }
+    ],
+    "expected_tool_calls": [
+      {
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "ip_address": "10.0.0.1"
+        }
+      }
+    ],
+    "expected_tool_statuses": ["success"],
+    "final_text": "IP 10.0.0.1 thuộc thiết bị NOC-APP-01, vendor Linux, station NOC.",
+    "expected_final_contains": ["10.0.0.1", "NOC-APP-01", "Linux"]
+  },
+  {
+    "name": "vague alarm question asks clarification",
+    "user_message": "Kiểm tra alarm giúp tôi",
+    "provider_tool_calls": [],
+    "expected_tool_calls": [],
+    "final_text": "Bạn muốn kiểm tra loại alarm nào hoặc thiết bị nào? Vui lòng cung cấp alarm_type, severity, hoặc tên thiết bị.",
+    "expected_final_contains": ["loại alarm", "thiết bị"]
+  },
+  {
+    "name": "tool failure is surfaced without hallucination",
+    "user_message": "Tra inventory IP 192.0.2.10",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_missing_inventory",
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "ip_address": "192.0.2.10"
+        }
+      }
+    ],
+    "expected_tool_calls": [
+      {
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "ip_address": "192.0.2.10"
+        }
+      }
+    ],
+    "expected_tool_statuses": ["business_error"],
+    "final_text": "Không tìm thấy thiết bị IP 192.0.2.10 trong inventory; tôi không suy đoán thêm khi thiếu dữ liệu.",
+    "expected_final_contains": ["Không tìm thấy", "không suy đoán"]
+  }
+]
