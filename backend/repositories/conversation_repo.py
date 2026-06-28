@@ -28,6 +28,7 @@ class ConversationRepository:
         conversation_id: str,
         role: str,
         content: str | None = None,
+        thinking_content: str | None = None,
         tool_calls: list[dict] | None = None,
         tool_call_id: str | None = None,
         name: str | None = None,
@@ -37,6 +38,7 @@ class ConversationRepository:
             conversation_id=conversation_id,
             role=role,
             content=content,
+            thinking_content=thinking_content,
             tool_calls=json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
             tool_call_id=tool_call_id,
             name=name,
@@ -57,6 +59,8 @@ class ConversationRepository:
             entry: dict = {"role": msg.role, "is_error": msg.is_error}
             if msg.content is not None:
                 entry["content"] = msg.content
+            if msg.thinking_content is not None:
+                entry["thinking_content"] = msg.thinking_content
             if msg.tool_calls is not None:
                 entry["tool_calls"] = json.loads(msg.tool_calls)
             if msg.tool_call_id is not None:

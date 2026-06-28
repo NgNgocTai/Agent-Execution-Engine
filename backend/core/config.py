@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "anthropic/claude-3-haiku"
     anthropic_base_url: str = "https://openrouter.ai/api/v1"
+    anthropic_max_tokens: int = 4096
+    anthropic_reasoning_max_tokens: int = 1024
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek/deepseek-r1"
     deepseek_base_url: str = "https://openrouter.ai/api/v1"
@@ -19,6 +21,7 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_trace_thinking_content: bool = False
     ssh_host: str = ""
     ssh_user: str = ""
     ssh_password: str = ""

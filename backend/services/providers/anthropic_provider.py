@@ -5,6 +5,12 @@ from typing import AsyncGenerator
 from core.config import settings
 from core.schemas import NormalizedMessage, NormalizedResponse, NormalizedToolCall
 from services.providers.base import LLMProvider
+from services.providers.thinking import (
+    ThinkTagParser,
+    format_provider_error,
+    get_reasoning_delta,
+    parse_tool_arguments,
+)
 from services.skills.base import ToolSchema
 
 logger = logging.getLogger(__name__)
@@ -134,22 +140,49 @@ class AnthropicProvider(LLMProvider):
     ) -> AsyncGenerator[NormalizedResponse, None]:
         openai_messages = self._convert_to_openai_messages(messages)
         openai_tools = self.format_tools(tools) if tools else None
+        reasoning_max_tokens = max(settings.anthropic_reasoning_max_tokens, 0)
+        max_tokens = max(
+            settings.anthropic_max_tokens,
+            reasoning_max_tokens + 1,
+        )
+        extra_body = (
+            {
+                "reasoning": {
+                    "max_tokens": reasoning_max_tokens,
+                    "exclude": False,
+                }
+            }
+            if reasoning_max_tokens > 0
+            else None
+        )
 
         try:
             response = await self.client.chat.completions.create(
                 model=self.model_name,
                 messages=openai_messages,
                 tools=openai_tools,
+                max_tokens=max_tokens,
                 stream=True,
                 stream_options={"include_usage": True},
-                extra_body={"reasoning": {"effort": "high"}},
+                extra_body=extra_body,
             )
         except Exception as e:
             logger.error("LLM API error: %s", e)
-            yield NormalizedResponse(text_content=f"Loi ket noi LLM: {e}", stop_reason="end_turn")
+            error_message = format_provider_error(e, "Anthropic", self.model_name)
+            yield NormalizedResponse(
+                text_content=error_message,
+                stop_reason="end_turn",
+                provider_error={
+                    "provider": "Anthropic",
+                    "model": self.model_name,
+                    "error_type": type(e).__name__,
+                    "message": error_message,
+                },
+            )
             return
 
         tool_call_buffers: dict[int, dict] = {}
+        think_parser = ThinkTagParser()
         async for chunk in response:
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta is None:
@@ -164,26 +197,39 @@ class AnthropicProvider(LLMProvider):
                             tool_call_buffers[idx]["name"] += tc_delta.function.name
                         if tc_delta.function.arguments:
                             tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
-            reasoning = getattr(delta, "reasoning", None)
-            if reasoning:
-                yield NormalizedResponse(thinking_content=reasoning)
-                continue
             if delta.content:
-                yield NormalizedResponse(text_content=delta.content, stop_reason="")
+                for kind, content in think_parser.feed(delta.content):
+                    if kind == "thinking":
+                        yield NormalizedResponse(thinking_content=content)
+                    else:
+                        yield NormalizedResponse(text_content=content, stop_reason="")
             finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
             if finish_reason == "tool_calls":
+                for kind, content in think_parser.flush():
+                    if kind == "thinking":
+                        yield NormalizedResponse(thinking_content=content)
+                    else:
+                        yield NormalizedResponse(text_content=content, stop_reason="")
                 yield NormalizedResponse(
                     tool_calls=[
                         NormalizedToolCall(
                             call_id=buf["id"],
                             tool_name=buf["name"].split("<")[0] if buf["name"] else "",
-                            arguments=json.loads(buf["arguments_str"]) if buf["arguments_str"] else {},
+                            arguments=parse_tool_arguments(
+                                buf["arguments_str"],
+                                buf["name"],
+                            ),
                         )
                         for buf in tool_call_buffers.values()
                     ],
                     stop_reason="tool_calls",
                 )
             elif finish_reason == "stop":
+                for kind, content in think_parser.flush():
+                    if kind == "thinking":
+                        yield NormalizedResponse(thinking_content=content)
+                    else:
+                        yield NormalizedResponse(text_content=content, stop_reason="")
                 yield NormalizedResponse(stop_reason="end_turn")
             if hasattr(chunk, "usage") and chunk.usage:
                 yield NormalizedResponse(token_usage={"input": chunk.usage.prompt_tokens, "output": chunk.usage.completion_tokens})
@@ -197,12 +243,13 @@ class AnthropicProvider(LLMProvider):
         try:
             async with self.client.messages.stream(
                 model=self.model_name,
-                max_tokens=4096,
+                max_tokens=settings.anthropic_max_tokens,
                 messages=anthropic_messages,
                 tools=anthropic_tools,
             ) as stream:
                 current_tool: dict | None = None
                 json_buffer = ""
+                think_parser = ThinkTagParser()
                 input_tokens = 0
                 output_tokens = 0
 
@@ -219,22 +266,43 @@ class AnthropicProvider(LLMProvider):
                             json_buffer = ""
                     elif event.type == "content_block_delta":
                         if event.delta.type == "text_delta":
-                            yield NormalizedResponse(text_content=event.delta.text, stop_reason="")
+                            for kind, content in think_parser.feed(event.delta.text):
+                                if kind == "thinking":
+                                    yield NormalizedResponse(thinking_content=content)
+                                else:
+                                    yield NormalizedResponse(text_content=content, stop_reason="")
+                        elif event.delta.type == "thinking_delta":
+                            yield NormalizedResponse(thinking_content=event.delta.thinking, stop_reason="")
                         elif event.delta.type == "input_json_delta":
                             json_buffer += event.delta.partial_json
                     elif event.type == "content_block_stop":
                         if current_tool:
-                            args = json.loads(json_buffer) if json_buffer else {}
+                            args = parse_tool_arguments(json_buffer, current_tool["name"])
                             yield NormalizedResponse(
                                 tool_calls=[NormalizedToolCall(call_id=current_tool["id"], tool_name=current_tool["name"], arguments=args)],
                                 stop_reason="tool_calls",
                             )
                             current_tool = None
                     elif event.type == "message_stop":
+                        for kind, content in think_parser.flush():
+                            if kind == "thinking":
+                                yield NormalizedResponse(thinking_content=content)
+                            else:
+                                yield NormalizedResponse(text_content=content, stop_reason="")
                         if input_tokens > 0 or output_tokens > 0:
                             yield NormalizedResponse(token_usage={"input": input_tokens, "output": output_tokens})
                         yield NormalizedResponse(stop_reason="end_turn")
         except Exception as e:
             logger.error("Anthropic API error: %s", e)
-            yield NormalizedResponse(text_content=f"Lỗi kết nối Anthropic: {e}", stop_reason="end_turn")
+            error_message = format_provider_error(e, "Anthropic", self.model_name)
+            yield NormalizedResponse(
+                text_content=error_message,
+                stop_reason="end_turn",
+                provider_error={
+                    "provider": "Anthropic",
+                    "model": self.model_name,
+                    "error_type": type(e).__name__,
+                    "message": error_message,
+                },
+            )
             return

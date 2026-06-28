@@ -39,6 +39,7 @@ class NormalizedToolCall(BaseModel):
 class NormalizedMessage(BaseModel):
     role: str
     content: str | None = None
+    thinking_content: str | None = None
     tool_calls: list[NormalizedToolCall] | None = None
     tool_call_id: str | None = None
     tool_name: str | None = None
@@ -51,3 +52,4 @@ class NormalizedResponse(BaseModel):
     thinking_content: str | None = None
     stop_reason: str = ""
     token_usage: dict | None = None
+    provider_error: dict | None = None

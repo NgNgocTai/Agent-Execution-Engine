@@ -2,12 +2,22 @@ import { useCallback, useRef, useState } from "react";
 import type { ChatMessage, ToolCallCard } from "../types";
 import { sendMessage, getConversationMessages } from "../lib/api";
 
+function appendThinkingContent(message: ChatMessage, content: string, isExpanded: boolean) {
+  const lastBlock = message.thinkingBlocks[message.thinkingBlocks.length - 1];
+  if (lastBlock) {
+    lastBlock.content += `${lastBlock.content ? "\n\n" : ""}${content}`;
+  } else {
+    message.thinkingBlocks.push({ content, isExpanded });
+  }
+}
+
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentProvider, setCurrentProvider] = useState("openai");
   const abortRef = useRef<AbortController | null>(null);
+  const lastThinkingIterationRef = useRef<number | null>(null);
 
   const now = () =>
     new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -38,15 +48,47 @@ export function useChat() {
 
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setIsStreaming(true);
+      lastThinkingIterationRef.current = null;
 
       const abort = new AbortController();
       abortRef.current = abort;
 
       try {
-        const resp = await sendMessage(message, currentProvider, conversationId);
-        const reader = resp.body!.getReader();
+        const resp = await sendMessage(message, currentProvider, conversationId, abort.signal);
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          let errorMessage = text || `HTTP ${resp.status}`;
+          try {
+            const parsed = JSON.parse(text);
+            errorMessage = parsed.error || parsed.detail || errorMessage;
+          } catch {
+            // keep raw text
+          }
+          throw new Error(errorMessage);
+        }
+
+        if (!resp.body) {
+          throw new Error("Server returned an empty response body.");
+        }
+
+        const contentType = resp.headers.get("content-type") || "";
+        if (!contentType.includes("text/event-stream")) {
+          const text = await resp.text();
+          let errorMessage = text || "Server returned a non-streaming response.";
+          try {
+            const parsed = JSON.parse(text);
+            errorMessage = parsed.error || parsed.detail || errorMessage;
+          } catch {
+            // keep raw text
+          }
+          throw new Error(errorMessage);
+        }
+
+        const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let sawTerminalEvent = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -66,16 +108,23 @@ export function useChat() {
               const edata = event.data;
 
               if (etype === "thinking") {
+                const iteration = typeof event.iteration === "number" ? event.iteration : null;
                 setMessages((prev) => {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
                   const updated = [...prev];
                   const blocks = [...updated[last].thinkingBlocks];
+                  const content =
+                    iteration !== null &&
+                    lastThinkingIterationRef.current !== null &&
+                    iteration !== lastThinkingIterationRef.current
+                      ? `\n\n${edata.content || ""}`
+                      : edata.content || "";
                   if (blocks.length > 0) {
                     // Append vào thinking block cuối cùng (streaming dần)
                     blocks[blocks.length - 1] = {
                       ...blocks[blocks.length - 1],
-                      content: blocks[blocks.length - 1].content + (edata.content || ""),
+                      content: blocks[blocks.length - 1].content + content,
                     };
                   } else {
                     // Tạo thinking block mới
@@ -84,6 +133,7 @@ export function useChat() {
                   updated[last] = { ...updated[last], thinkingBlocks: blocks };
                   return updated;
                 });
+                lastThinkingIterationRef.current = iteration;
               }
 
               if (etype === "tool_call_start") {
@@ -151,6 +201,7 @@ export function useChat() {
               }
 
               if (etype === "final_answer") {
+                sawTerminalEvent = true;
                 setMessages((prev) => {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
@@ -166,6 +217,7 @@ export function useChat() {
               }
 
               if (etype === "error") {
+                sawTerminalEvent = true;
                 setMessages((prev) => {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
@@ -183,6 +235,17 @@ export function useChat() {
               // skip malformed JSON
             }
           }
+        }
+
+        if (!sawTerminalEvent) {
+          setMessages((prev) => {
+            const last = prev.length - 1;
+            if (last < 0 || prev[last].role !== "assistant") return prev;
+            const updated = [...prev];
+            updated[last] = { ...updated[last], isStreaming: false };
+            return updated;
+          });
+          setIsStreaming(false);
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -206,6 +269,7 @@ export function useChat() {
 
   const newChat = useCallback(() => {
     abortRef.current?.abort();
+    lastThinkingIterationRef.current = null;
     setMessages([]);
     setConversationId(null);
     setIsStreaming(false);
@@ -258,6 +322,10 @@ export function useChat() {
           }
 
           if (msg.role === "assistant") {
+            if (msg.thinking_content) {
+              appendThinkingContent(lastMsg, msg.thinking_content, false);
+            }
+
             if (msg.content) {
               lastMsg.textContent += (lastMsg.textContent ? "\n\n" : "") + msg.content;
             }
@@ -295,12 +363,9 @@ export function useChat() {
               });
               lastMsg.toolCallCards.push(...newCards);
 
-              if (!msg.content) {
+              if (!msg.content && !msg.thinking_content) {
                 const toolNames = newCards.map((c: any) => c.toolName).join(", ");
-                lastMsg.thinkingBlocks.push({
-                  content: `Tiến hành gọi công cụ: ${toolNames}...`,
-                  isExpanded: false,
-                });
+                appendThinkingContent(lastMsg, `Tiến hành gọi công cụ: ${toolNames}...`, false);
               }
             }
           } else if (msg.role === "tool") {

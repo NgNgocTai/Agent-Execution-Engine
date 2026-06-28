@@ -4,12 +4,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from controllers.chat import router as chat_router, set_engine
+from core.config import settings
 from repositories.clickhouse_repo import AlarmRepository
 from repositories.engine import init_db
 from repositories.postgres_repo import DeviceRepository
 from services.agent_service import AgentEngine
 from services.skills.noc_alarm_enrichment import NocAlarmEnrichmentSkill
 from services.skills.node_health_remediate import NodeHealthRemediateSkill
+from services.skills.alarm_statistics import AlarmStatisticsSkill
+from services.skills.device_inventory_lookup import DeviceInventoryLookupSkill
 from services.skills.registry import SkillRegistry
 from services.tool_executor import ToolExecutor
 from tracing.langfuse_tracer import LangfuseTracer
@@ -18,10 +21,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NOC Agent API", version="1.0.0")
+cors_origins = [
+    origin.strip()
+    for origin in settings.cors_origins.split(",")
+    if origin.strip()
+] or ["*"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,6 +51,8 @@ async def startup():
     registry = SkillRegistry()
     registry.register(NocAlarmEnrichmentSkill(alarm_repo, device_repo))
     registry.register(NodeHealthRemediateSkill())
+    registry.register(AlarmStatisticsSkill(alarm_repo, device_repo))
+    registry.register(DeviceInventoryLookupSkill(alarm_repo, device_repo))
 
     tool_executor = ToolExecutor(registry)
 

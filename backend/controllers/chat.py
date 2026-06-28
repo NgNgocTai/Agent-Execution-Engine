@@ -1,7 +1,7 @@
 import logging
 from typing import AsyncGenerator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -33,7 +33,7 @@ async def rename_conversation(conversation_id: str, req: RenameRequest):
         repo = ConversationRepository(session)
         success = await repo.rename(conversation_id, req.title)
         if not success:
-            return {"error": "Conversation not found"}
+            raise HTTPException(status_code=404, detail="Conversation not found")
         return {"success": True}
 
 
@@ -70,7 +70,7 @@ async def get_conversation_messages(conversation_id: str):
         repo = ConversationRepository(session)
         conversation = await repo.get(conversation_id)
         if not conversation:
-            return {"error": "Conversation not found"}
+            raise HTTPException(status_code=404, detail="Conversation not found")
         messages = await repo.get_messages(conversation_id)
         return {
             "conversation_id": conversation_id,
@@ -93,14 +93,14 @@ async def delete_conversation(conversation_id: str):
         repo = ConversationRepository(session)
         success = await repo.delete(conversation_id)
         if not success:
-            return {"error": "Conversation not found"}
+            raise HTTPException(status_code=404, detail="Conversation not found")
         return {"success": True}
 
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
     if engine is None:
-        return {"error": "AgentEngine not initialized"}
+        raise HTTPException(status_code=503, detail="AgentEngine not initialized")
 
     async with async_session() as session:
         repo = ConversationRepository(session)
@@ -108,7 +108,7 @@ async def chat(req: ChatRequest):
         if req.conversation_id:
             conversation = await repo.get(req.conversation_id)
             if not conversation:
-                return {"error": "Conversation not found"}
+                raise HTTPException(status_code=404, detail="Conversation not found")
         else:
             conversation = await repo.create(provider=req.provider)
 
@@ -142,6 +142,7 @@ async def chat(req: ChatRequest):
                             conversation.id,
                             role=msg.role,
                             content=msg.content,
+                            thinking_content=msg.thinking_content,
                             tool_calls=[tc.model_dump() for tc in msg.tool_calls] if msg.tool_calls else None,
                             tool_call_id=msg.tool_call_id,
                             name=msg.tool_name,

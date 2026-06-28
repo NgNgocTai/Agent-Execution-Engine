@@ -40,6 +40,7 @@ def build_messages(
             NormalizedMessage(
                 role=row["role"],
                 content=row.get("content"),
+                thinking_content=row.get("thinking_content"),
                 tool_calls=tool_calls,
                 tool_call_id=row.get("tool_call_id"),
                 tool_name=row.get("name"),
