@@ -60,6 +60,7 @@ class AgentEngine:
             pending_tool_calls: list[NormalizedToolCall] = []
             accumulated_text = ""
             accumulated_thinking = ""
+            provider_error = None
 
             # --- Langfuse: Bắt đầu ghi nhận LLM Call ---
             model_name = getattr(provider, "model_name", "unknown")
@@ -74,6 +75,9 @@ class AgentEngine:
             async for response in provider.chat_completion(messages, tools):
                 if response.token_usage:
                     total_token_usage = response.token_usage
+
+                if response.provider_error:
+                    provider_error = response.provider_error
 
                 if response.tool_calls:
                     for tc in response.tool_calls:
@@ -109,6 +113,8 @@ class AgentEngine:
                         for tc in pending_tool_calls
                     ] if pending_tool_calls else None,
                     usage=total_token_usage,
+                    thinking_content=accumulated_thinking or None,
+                    provider_error=provider_error,
                 )
 
             # Nếu có tool calls mà LLM lười không giải thích -> Tự động tạo reasoning

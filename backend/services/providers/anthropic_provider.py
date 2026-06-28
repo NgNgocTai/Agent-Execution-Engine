@@ -168,9 +168,16 @@ class AnthropicProvider(LLMProvider):
             )
         except Exception as e:
             logger.error("LLM API error: %s", e)
+            error_message = format_provider_error(e, "Anthropic", self.model_name)
             yield NormalizedResponse(
-                text_content=format_provider_error(e, "Anthropic", self.model_name),
+                text_content=error_message,
                 stop_reason="end_turn",
+                provider_error={
+                    "provider": "Anthropic",
+                    "model": self.model_name,
+                    "error_type": type(e).__name__,
+                    "message": error_message,
+                },
             )
             return
 
@@ -293,8 +300,15 @@ class AnthropicProvider(LLMProvider):
                         yield NormalizedResponse(stop_reason="end_turn")
         except Exception as e:
             logger.error("Anthropic API error: %s", e)
+            error_message = format_provider_error(e, "Anthropic", self.model_name)
             yield NormalizedResponse(
-                text_content=format_provider_error(e, "Anthropic", self.model_name),
+                text_content=error_message,
                 stop_reason="end_turn",
+                provider_error={
+                    "provider": "Anthropic",
+                    "model": self.model_name,
+                    "error_type": type(e).__name__,
+                    "message": error_message,
+                },
             )
             return

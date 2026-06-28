@@ -52,3 +52,4 @@ class NormalizedResponse(BaseModel):
     thinking_content: str | None = None
     stop_reason: str = ""
     token_usage: dict | None = None
+    provider_error: dict | None = None

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_trace_thinking_content: bool = False
     ssh_host: str = ""
     ssh_user: str = ""
     ssh_password: str = ""

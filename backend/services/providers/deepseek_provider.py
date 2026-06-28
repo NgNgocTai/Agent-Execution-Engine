@@ -90,9 +90,16 @@ class DeepSeekProvider(LLMProvider):
             )
         except Exception as e:
             logger.error("DeepSeek API error: %s", e)
+            error_message = format_provider_error(e, "DeepSeek", self.model_name)
             yield NormalizedResponse(
-                text_content=format_provider_error(e, "DeepSeek", self.model_name),
+                text_content=error_message,
                 stop_reason="end_turn",
+                provider_error={
+                    "provider": "DeepSeek",
+                    "model": self.model_name,
+                    "error_type": type(e).__name__,
+                    "message": error_message,
+                },
             )
             return
 
