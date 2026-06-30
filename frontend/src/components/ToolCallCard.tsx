@@ -1,12 +1,13 @@
-import { Wrench, ChevronDown, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Wrench, Loader2, CheckCircle2, XCircle, ShieldAlert } from "lucide-react";
 import type { ToolCallCard as ToolCallCardType } from "../types";
 
 interface Props {
   card: ToolCallCardType;
   onToggleTab?: (callId: string, showInput: boolean) => void;
+  onApprovalDecision?: (callId: string, approved: boolean) => void;
 }
 
-export default function ToolCallCard({ card, onToggleTab }: Props) {
+export default function ToolCallCard({ card, onToggleTab, onApprovalDecision }: Props) {
   const statusConfig = {
     loading: {
       icon: <Loader2 size={12} className="animate-spin" />,
@@ -31,6 +32,14 @@ export default function ToolCallCard({ card, onToggleTab }: Props) {
       text: "text-red-700",
       border: "border-red-200",
       cardBorder: "border-red-200",
+    },
+    approval_required: {
+      icon: <ShieldAlert size={12} />,
+      label: "NEEDS APPROVAL",
+      bg: "bg-amber-100/70",
+      text: "text-amber-700",
+      border: "border-amber-200",
+      cardBorder: "border-amber-300",
     },
   };
 
@@ -57,6 +66,43 @@ export default function ToolCallCard({ card, onToggleTab }: Props) {
           )}
         </div>
       </div>
+
+      {card.status === "approval_required" && card.approval && (
+        <div className="px-4 py-4 bg-amber-50 border-t border-amber-200">
+          <div className="text-sm font-semibold text-amber-900 mb-2">
+            Cần xác nhận trước khi thực thi action nguy hiểm
+          </div>
+          <div className="grid gap-2 text-xs text-amber-900/80">
+            <div>
+              <span className="font-semibold">Action:</span> {card.approval.action || "unknown"}
+            </div>
+            <div>
+              <span className="font-semibold">Host:</span> {card.approval.host || "unknown"}
+            </div>
+            {card.approval.command && (
+              <code className="block bg-white/80 border border-amber-200 rounded px-2 py-1 text-[12px] text-amber-950 overflow-x-auto">
+                {card.approval.command}
+              </code>
+            )}
+          </div>
+          <div className="flex items-center gap-2 mt-4">
+            <button
+              type="button"
+              onClick={() => onApprovalDecision?.(card.callId, true)}
+              className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors"
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              onClick={() => onApprovalDecision?.(card.callId, false)}
+              className="px-3 py-1.5 rounded-md bg-white border border-amber-300 text-amber-800 text-xs font-bold hover:bg-amber-100 transition-colors"
+            >
+              Reject
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="p-4 bg-[#0a0a0a] font-mono text-[13px] leading-relaxed">
         <div className="flex gap-4 border-b border-white/10 mb-3 pb-1">

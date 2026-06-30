@@ -22,6 +22,7 @@ def build_messages(
     history: list[dict],
     user_message: str,
     system_prompt: str,
+    append_user: bool = True,
 ) -> list[NormalizedMessage]:
     normalized_history = []
     for row in history:
@@ -50,5 +51,8 @@ def build_messages(
 
     system_msg = NormalizedMessage(role="system", content=system_prompt)
     recent = truncate_history(normalized_history)
+    if not append_user:
+        return [system_msg, *recent]
+
     user_msg = NormalizedMessage(role="user", content=user_message)
     return [system_msg, *recent, user_msg]

@@ -7,9 +7,15 @@ interface Props {
   message: ChatMessage;
   messageIndex: number;
   onToggleTab?: (callId: string, showInput: boolean) => void;
+  onApprovalDecision?: (callId: string, approved: boolean) => void;
 }
 
-export default function ReasoningTrace({ message, messageIndex, onToggleTab }: Props) {
+export default function ReasoningTrace({
+  message,
+  messageIndex,
+  onToggleTab,
+  onApprovalDecision,
+}: Props) {
   const hasTrace =
     message.thinkingBlocks.length > 0 ||
     message.toolCallCards.length > 0 ||
@@ -41,6 +47,8 @@ export default function ReasoningTrace({ message, messageIndex, onToggleTab }: P
                   className={`w-2 h-2 rounded-full ${
                     card.status === "loading"
                       ? "bg-[#0050cb] animate-pulse"
+                      : card.status === "approval_required"
+                        ? "bg-amber-500"
                       : card.status === "success"
                         ? "bg-green-500"
                         : "bg-red-500"
@@ -48,7 +56,11 @@ export default function ReasoningTrace({ message, messageIndex, onToggleTab }: P
                 />
               </div>
               <div className="ml-10">
-                <ToolCallCard card={card} onToggleTab={onToggleTab} />
+                <ToolCallCard
+                  card={card}
+                  onToggleTab={onToggleTab}
+                  onApprovalDecision={onApprovalDecision}
+                />
               </div>
             </div>
           ))}

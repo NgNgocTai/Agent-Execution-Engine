@@ -97,7 +97,12 @@ class ConversationRepository:
 
     async def delete(self, conversation_id: str) -> bool:
         from sqlalchemy import delete
+        from repositories.models import PendingApproval
         
+        await self.session.execute(
+            delete(PendingApproval).where(PendingApproval.conversation_id == conversation_id)
+        )
+
         # Delete messages first due to foreign key
         await self.session.execute(
             delete(Message).where(Message.conversation_id == conversation_id)
