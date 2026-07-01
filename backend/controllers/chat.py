@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
+MAX_USER_MESSAGE_CHARS = 5000
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -296,6 +298,14 @@ async def approve_action(req: ApprovalDecisionRequest):
 async def chat(req: ChatRequest):
     if engine is None:
         raise HTTPException(status_code=503, detail="AgentEngine not initialized")
+
+    if len(req.message) > MAX_USER_MESSAGE_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Nội dung quá dài, vui lòng rút gọn hoặc chia thành nhiều câu hỏi."
+            ),
+        )
 
     async with async_session() as session:
         repo = ConversationRepository(session)

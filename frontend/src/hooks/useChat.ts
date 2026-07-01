@@ -289,7 +289,7 @@ export function useChat() {
             const updated = [...prev];
             updated[last] = {
               ...updated[last],
-              textContent: `❌ Network error: ${(err as Error).message}`,
+              textContent: `❌ ${(err as Error).message}`,
               isStreaming: false,
             };
             return updated;

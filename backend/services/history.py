@@ -1,6 +1,6 @@
 from core.schemas import NormalizedMessage, NormalizedToolCall
 
-MAX_HISTORY_MESSAGES = 80
+MAX_HISTORY_MESSAGES = 30
 
 
 def truncate_history(
