@@ -10,6 +10,7 @@ class AgentEventType(str, Enum):
     THINKING = "thinking"
     TOOL_CALL_START = "tool_call_start"
     TOOL_CALL_RESULT = "tool_call_result"
+    APPROVAL_REQUIRED = "approval_required"
     TEXT_DELTA = "text_delta"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
@@ -39,6 +40,7 @@ class NormalizedToolCall(BaseModel):
 class NormalizedMessage(BaseModel):
     role: str
     content: str | None = None
+    thinking_content: str | None = None
     tool_calls: list[NormalizedToolCall] | None = None
     tool_call_id: str | None = None
     tool_name: str | None = None
@@ -51,3 +53,4 @@ class NormalizedResponse(BaseModel):
     thinking_content: str | None = None
     stop_reason: str = ""
     token_usage: dict | None = None
+    provider_error: dict | None = None

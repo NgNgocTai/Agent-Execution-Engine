@@ -32,6 +32,7 @@ METRICS_SCRIPT = (
 
 # Giới hạn an toàn cho log_lines để tránh ai đó truyền số khổng lồ làm tràn context
 MAX_LOG_LINES = 1000
+DANGEROUS_ACTIONS = {"restart_docker", "restart_service"}
 
 
 class NodeHealthRemediateSkill(BaseSkill):
@@ -118,6 +119,31 @@ class NodeHealthRemediateSkill(BaseSkill):
         _, output, _ = self._ssh_exec(host, METRICS_SCRIPT)
         return json.loads(output)
 
+    def execute_approved_command(self, host: str, command: str) -> dict:
+        try:
+            exit_code, stdout_text, stderr_text = self._ssh_exec(host, command)
+            return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "host": host,
+                "command": command,
+                "executed": True,
+                "command_succeeded": exit_code == 0,
+                "exit_code": exit_code,
+                "stdout": stdout_text,
+                "stderr": stderr_text,
+            }
+        except Exception as e:
+            return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "host": host,
+                "command": command,
+                "executed": False,
+                "command_succeeded": False,
+                "exit_code": None,
+                "stdout": None,
+                "stderr": f"Error executing approved command: {e}",
+            }
+
     async def execute(
         self,
         host: str,
@@ -192,6 +218,39 @@ class NodeHealthRemediateSkill(BaseSkill):
         stderr_text = None
         command_succeeded = None  # None = chưa chạy; True/False = đã chạy, dựa theo exit_code
 
+        evaluation = {
+            "ram_high": ram_high,
+            "cpu_high": cpu_high,
+        }
+        thresholds = {
+            "ram_threshold": ram_threshold,
+            "cpu_threshold": cpu_threshold,
+        }
+
+        if command and not dry_run and action in DANGEROUS_ACTIONS:
+            approval_metadata = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "host": host,
+                "service": service,
+                "action": action,
+                "command": command,
+                "metrics": metrics,
+                "thresholds": thresholds,
+                "evaluation": evaluation,
+                "reason": "Dangerous remediation requires human approval before execution.",
+            }
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                data={
+                    **approval_metadata,
+                    "dry_run": dry_run,
+                    "executed": False,
+                    "approval_status": "pending",
+                },
+                needs_approval=True,
+                approval_metadata=approval_metadata,
+            )
+
         if command and not dry_run:
             try:
                 exit_code, stdout_text, stderr_text = self._ssh_exec(host, command)
@@ -202,15 +261,6 @@ class NodeHealthRemediateSkill(BaseSkill):
             except Exception as e:
                 stderr_text = f"Error executing command: {e}"
                 command_succeeded = False
-
-        evaluation = {
-            "ram_high": ram_high,
-            "cpu_high": cpu_high,
-        }
-        thresholds = {
-            "ram_threshold": ram_threshold,
-            "cpu_threshold": cpu_threshold,
-        }
 
         return SkillResult(
             status=SkillStatus.SUCCESS,

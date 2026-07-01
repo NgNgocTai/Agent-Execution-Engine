@@ -9,16 +9,32 @@ Ghi lại toàn bộ quá trình Agent hoạt động:
 
 from __future__ import annotations
 
-import json
 import logging
 import time
+from enum import Enum
 from typing import Any
 
 from langfuse import Langfuse
+from pydantic import BaseModel
 
 from core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert Pydantic/domain objects to Langfuse-friendly JSON data."""
+    if isinstance(value, BaseModel):
+        return _json_safe(value.model_dump(exclude_none=True))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 class LangfuseTracer:
@@ -96,8 +112,11 @@ class TraceContext:
         generation = self._trace.generation(
             name=f"llm-call-iter-{iteration}",
             model=model,
-            input=messages,
-            metadata={"tools_count": len(tools) if tools else 0},
+            input=_json_safe(messages),
+            metadata={
+                "tools_count": len(tools) if tools else 0,
+                "tools": _json_safe(tools or []),
+            },
         )
         return GenerationContext(generation=generation, enabled=True)
 
@@ -113,7 +132,7 @@ class TraceContext:
 
         span = self._trace.span(
             name=f"tool-{tool_name}",
-            input=arguments,
+            input=_json_safe(arguments),
             metadata={"iteration": iteration},
         )
         return SpanContext(span=span, enabled=True)
@@ -130,7 +149,7 @@ class TraceContext:
 
         try:
             self._trace.update(
-                output=output or "completed",
+                output=_json_safe(output or "completed"),
                 metadata={
                     "total_tool_calls": total_tool_calls,
                     "total_duration_ms": round(total_duration_ms, 2),
@@ -153,6 +172,8 @@ class GenerationContext:
         output: str | None = None,
         tool_calls: list[dict] | None = None,
         usage: dict | None = None,
+        thinking_content: str | None = None,
+        provider_error: dict | None = None,
     ) -> None:
         """Kết thúc Generation, ghi output và usage."""
         if not self._enabled or not self._generation:
@@ -160,6 +181,22 @@ class GenerationContext:
 
         try:
             end_data: dict[str, Any] = {}
+
+            metadata: dict[str, Any] = {}
+
+            if thinking_content:
+                metadata["thinking_present"] = True
+                metadata["thinking_chars"] = len(thinking_content)
+                if settings.langfuse_trace_thinking_content:
+                    metadata["thinking_content"] = thinking_content
+            else:
+                metadata["thinking_present"] = False
+                metadata["thinking_chars"] = 0
+
+            if provider_error:
+                metadata["provider_error"] = provider_error
+                end_data["level"] = "ERROR"
+                end_data["status_message"] = provider_error.get("message", "Provider error")
 
             # Ghi nhận đầy đủ: nếu có cả text VÀ tool_calls thì giữ nguyên cả 2
             if output and tool_calls:
@@ -173,9 +210,11 @@ class GenerationContext:
                 end_data["output"] = output
 
             if usage:
-                end_data["usage"] = usage
+                end_data["usage_details"] = usage
 
-            self._generation.end(**end_data)
+            end_data["metadata"] = _json_safe(metadata)
+
+            self._generation.end(**_json_safe(end_data))
         except Exception as e:
             logger.warning("Langfuse generation end error: %s", e)
 
@@ -201,12 +240,12 @@ class SpanContext:
         try:
             output_data = {
                 "status": status,
-                "result": result,
+                "result": _json_safe(result),
                 "error": error,
             }
             if execution_time_ms is not None:
                 output_data["execution_time_ms"] = round(execution_time_ms, 2)
 
-            self._span.end(output=output_data)
+            self._span.end(output=_json_safe(output_data))
         except Exception as e:
             logger.warning("Langfuse span end error: %s", e)

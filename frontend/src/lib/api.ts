@@ -4,14 +4,34 @@ export async function sendMessage(
   message: string,
   provider: string,
   conversationId: string | null,
+  signal?: AbortSignal,
 ): Promise<Response> {
   return fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal,
     body: JSON.stringify({
       message,
       provider,
       conversation_id: conversationId,
+    }),
+  });
+}
+
+export async function approveAction(
+  conversationId: string,
+  callId: string,
+  approved: boolean,
+  signal?: AbortSignal,
+): Promise<Response> {
+  return fetch(`${API_BASE}/chat/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      call_id: callId,
+      approved,
     }),
   });
 }
@@ -54,9 +74,17 @@ export interface ConversationMessages {
   messages: Array<{
     role: string;
     content?: string;
+    thinking_content?: string;
     tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
     tool_call_id?: string;
     name?: string;
+  }>;
+  pending_approvals?: Array<{
+    call_id: string;
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    approval: Record<string, unknown>;
+    expires_at: string;
   }>;
 }
 

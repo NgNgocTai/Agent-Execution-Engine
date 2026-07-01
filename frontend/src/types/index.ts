@@ -2,6 +2,7 @@ export type AgentEventType =
   | "thinking"
   | "tool_call_start"
   | "tool_call_result"
+  | "approval_required"
   | "text_delta"
   | "final_answer"
   | "conversation_id"
@@ -20,16 +21,34 @@ export interface ToolCallCard {
   callId: string;
   toolName: string;
   arguments: Record<string, unknown>;
-  status: "loading" | "success" | "error";
+  status: "loading" | "success" | "error" | "approval_required";
   result: Record<string, unknown> | string | null;
   error: string | null;
   executionTimeMs: number;
   showInput: boolean;
+  approval?: ApprovalRequest | null;
+}
+
+export interface ApprovalRequest {
+  host?: string;
+  service?: string;
+  action?: string;
+  command?: string;
+  reason?: string;
+  expires_at?: string;
+  metrics?: Record<string, unknown>;
+  thresholds?: Record<string, unknown>;
 }
 
 export interface ThinkingBlock {
   content: string;
   isExpanded: boolean;
+}
+
+export interface ProviderOption {
+  id: string;
+  label: string;
+  color: string;
 }
 
 export interface ChatMessage {

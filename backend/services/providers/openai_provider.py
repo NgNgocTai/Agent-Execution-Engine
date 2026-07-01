@@ -7,6 +7,12 @@ from openai import AsyncOpenAI
 from core.config import settings
 from core.schemas import NormalizedMessage, NormalizedResponse, NormalizedToolCall
 from services.providers.base import LLMProvider
+from services.providers.thinking import (
+    ThinkTagParser,
+    format_provider_error,
+    get_reasoning_delta,
+    parse_tool_arguments,
+)
 from services.skills.base import ToolSchema
 
 logger = logging.getLogger(__name__)
@@ -84,13 +90,21 @@ class OpenAIProvider(LLMProvider):
             )
         except Exception as e:
             logger.error("LLM API error: %s", e)
+            error_message = format_provider_error(e, "OpenAI", self.model_name)
             yield NormalizedResponse(
-                text_content=f"Loi ket noi LLM: {e}",
+                text_content=error_message,
                 stop_reason="end_turn",
+                provider_error={
+                    "provider": "OpenAI",
+                    "model": self.model_name,
+                    "error_type": type(e).__name__,
+                    "message": error_message,
+                },
             )
             return
 
         tool_call_buffers: dict[int, dict] = {}
+        think_parser = ThinkTagParser()
 
         async for chunk in response:
             delta = chunk.choices[0].delta if chunk.choices else None
@@ -113,26 +127,48 @@ class OpenAIProvider(LLMProvider):
                         if tc_delta.function.arguments:
                             tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
 
+            reasoning = get_reasoning_delta(delta)
+            if reasoning:
+                yield NormalizedResponse(thinking_content=reasoning)
+                continue
+
             if delta.content:
-                yield NormalizedResponse(
-                    text_content=delta.content,
-                    stop_reason="",
-                )
+                for kind, content in think_parser.feed(delta.content):
+                    if kind == "thinking":
+                        yield NormalizedResponse(thinking_content=content)
+                    else:
+                        yield NormalizedResponse(
+                            text_content=content,
+                            stop_reason="",
+                        )
 
             finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
             if finish_reason == "tool_calls":
+                for kind, content in think_parser.flush():
+                    if kind == "thinking":
+                        yield NormalizedResponse(thinking_content=content)
+                    else:
+                        yield NormalizedResponse(text_content=content, stop_reason="")
                 yield NormalizedResponse(
                     tool_calls=[
                         NormalizedToolCall(
                             call_id=buf["id"],
                             tool_name=buf["name"].split("<")[0] if buf["name"] else "",
-                            arguments=json.loads(buf["arguments_str"]) if buf["arguments_str"] else {},
+                            arguments=parse_tool_arguments(
+                                buf["arguments_str"],
+                                buf["name"],
+                            ),
                         )
                         for buf in tool_call_buffers.values()
                     ],
                     stop_reason="tool_calls",
                 )
             elif finish_reason == "stop":
+                for kind, content in think_parser.flush():
+                    if kind == "thinking":
+                        yield NormalizedResponse(thinking_content=content)
+                    else:
+                        yield NormalizedResponse(text_content=content, stop_reason="")
                 yield NormalizedResponse(stop_reason="end_turn")
             
             if hasattr(chunk, "usage") and chunk.usage:

@@ -1,6 +1,15 @@
 import { useCallback, useRef, useState } from "react";
 import type { ChatMessage, ToolCallCard } from "../types";
-import { sendMessage, getConversationMessages } from "../lib/api";
+import { approveAction, sendMessage, getConversationMessages } from "../lib/api";
+
+function appendThinkingContent(message: ChatMessage, content: string, isExpanded: boolean) {
+  const lastBlock = message.thinkingBlocks[message.thinkingBlocks.length - 1];
+  if (lastBlock) {
+    lastBlock.content += `${lastBlock.content ? "\n\n" : ""}${content}`;
+  } else {
+    message.thinkingBlocks.push({ content, isExpanded });
+  }
+}
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -8,6 +17,7 @@ export function useChat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentProvider, setCurrentProvider] = useState("openai");
   const abortRef = useRef<AbortController | null>(null);
+  const lastThinkingIterationRef = useRef<number | null>(null);
 
   const now = () =>
     new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -38,15 +48,47 @@ export function useChat() {
 
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setIsStreaming(true);
+      lastThinkingIterationRef.current = null;
 
       const abort = new AbortController();
       abortRef.current = abort;
 
       try {
-        const resp = await sendMessage(message, currentProvider, conversationId);
-        const reader = resp.body!.getReader();
+        const resp = await sendMessage(message, currentProvider, conversationId, abort.signal);
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          let errorMessage = text || `HTTP ${resp.status}`;
+          try {
+            const parsed = JSON.parse(text);
+            errorMessage = parsed.error || parsed.detail || errorMessage;
+          } catch {
+            // keep raw text
+          }
+          throw new Error(errorMessage);
+        }
+
+        if (!resp.body) {
+          throw new Error("Server returned an empty response body.");
+        }
+
+        const contentType = resp.headers.get("content-type") || "";
+        if (!contentType.includes("text/event-stream")) {
+          const text = await resp.text();
+          let errorMessage = text || "Server returned a non-streaming response.";
+          try {
+            const parsed = JSON.parse(text);
+            errorMessage = parsed.error || parsed.detail || errorMessage;
+          } catch {
+            // keep raw text
+          }
+          throw new Error(errorMessage);
+        }
+
+        const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let sawTerminalEvent = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -66,16 +108,23 @@ export function useChat() {
               const edata = event.data;
 
               if (etype === "thinking") {
+                const iteration = typeof event.iteration === "number" ? event.iteration : null;
                 setMessages((prev) => {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
                   const updated = [...prev];
                   const blocks = [...updated[last].thinkingBlocks];
+                  const content =
+                    iteration !== null &&
+                    lastThinkingIterationRef.current !== null &&
+                    iteration !== lastThinkingIterationRef.current
+                      ? `\n\n${edata.content || ""}`
+                      : edata.content || "";
                   if (blocks.length > 0) {
                     // Append vào thinking block cuối cùng (streaming dần)
                     blocks[blocks.length - 1] = {
                       ...blocks[blocks.length - 1],
-                      content: blocks[blocks.length - 1].content + (edata.content || ""),
+                      content: blocks[blocks.length - 1].content + content,
                     };
                   } else {
                     // Tạo thinking block mới
@@ -84,13 +133,14 @@ export function useChat() {
                   updated[last] = { ...updated[last], thinkingBlocks: blocks };
                   return updated;
                 });
+                lastThinkingIterationRef.current = iteration;
               }
 
               if (etype === "tool_call_start") {
                 const rawName = edata.tool_name || "";
                 const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
                 const card: ToolCallCard = {
-                  callId: `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                  callId: edata.call_id || `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                   toolName: cleanName,
                   arguments: edata.arguments || {},
                   status: "loading",
@@ -121,9 +171,10 @@ export function useChat() {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
                   const cards = [...prev[last].toolCallCards];
+                  const directIdx = cards.findIndex((c) => c.callId === edata.call_id);
                   const loadingIdx = [...cards].reverse().findIndex((c) => c.status === "loading");
-                  if (loadingIdx === -1) return prev;
-                  const idx = cards.length - 1 - loadingIdx;
+                  if (directIdx === -1 && loadingIdx === -1) return prev;
+                  const idx = directIdx !== -1 ? directIdx : cards.length - 1 - loadingIdx;
                   cards[idx] = {
                     ...cards[idx],
                     status,
@@ -135,6 +186,39 @@ export function useChat() {
                   updated[last] = { ...updated[last], toolCallCards: cards };
                   return updated;
                 });
+              }
+
+              if (etype === "approval_required") {
+                sawTerminalEvent = true;
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const cards = [...prev[last].toolCallCards];
+                  const directIdx = cards.findIndex((c) => c.callId === edata.call_id);
+                  const loadingIdx = [...cards].reverse().findIndex((c) => c.status === "loading");
+                  const idx = directIdx !== -1
+                    ? directIdx
+                    : loadingIdx !== -1
+                      ? cards.length - 1 - loadingIdx
+                      : -1;
+                  if (idx === -1) return prev;
+                  cards[idx] = {
+                    ...cards[idx],
+                    status: "approval_required",
+                    approval: edata.approval || null,
+                    result: edata.approval || null,
+                    error: null,
+                    executionTimeMs: 0,
+                  };
+                  const updated = [...prev];
+                  updated[last] = {
+                    ...updated[last],
+                    toolCallCards: cards,
+                    isStreaming: false,
+                  };
+                  return updated;
+                });
+                setIsStreaming(false);
               }
 
               if (etype === "text_delta") {
@@ -151,6 +235,7 @@ export function useChat() {
               }
 
               if (etype === "final_answer") {
+                sawTerminalEvent = true;
                 setMessages((prev) => {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
@@ -166,6 +251,7 @@ export function useChat() {
               }
 
               if (etype === "error") {
+                sawTerminalEvent = true;
                 setMessages((prev) => {
                   const last = prev.length - 1;
                   if (last < 0 || prev[last].role !== "assistant") return prev;
@@ -184,6 +270,17 @@ export function useChat() {
             }
           }
         }
+
+        if (!sawTerminalEvent) {
+          setMessages((prev) => {
+            const last = prev.length - 1;
+            if (last < 0 || prev[last].role !== "assistant") return prev;
+            const updated = [...prev];
+            updated[last] = { ...updated[last], isStreaming: false };
+            return updated;
+          });
+          setIsStreaming(false);
+        }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           setMessages((prev) => {
@@ -192,7 +289,7 @@ export function useChat() {
             const updated = [...prev];
             updated[last] = {
               ...updated[last],
-              textContent: `❌ Network error: ${(err as Error).message}`,
+              textContent: `❌ ${(err as Error).message}`,
               isStreaming: false,
             };
             return updated;
@@ -204,8 +301,260 @@ export function useChat() {
     [isStreaming, currentProvider, conversationId],
   );
 
+  const approveDecision = useCallback(
+    async (callId: string, approved: boolean) => {
+      if (!conversationId || isStreaming) return;
+
+      setIsStreaming(true);
+      setMessages((prev) => {
+        const updated = [...prev];
+        const last = updated.length - 1;
+        if (last < 0 || updated[last].role !== "assistant") return prev;
+        updated[last] = {
+          ...updated[last],
+          isStreaming: true,
+          toolCallCards: updated[last].toolCallCards.map((card) =>
+            card.callId === callId
+              ? {
+                  ...card,
+                  status: "loading",
+                  result: approved ? card.result : "Rejected by user",
+                  error: null,
+                }
+              : card,
+          ),
+        };
+        return updated;
+      });
+
+      const abort = new AbortController();
+      abortRef.current = abort;
+
+      try {
+        const resp = await approveAction(conversationId, callId, approved, abort.signal);
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          let errorMessage = text || `HTTP ${resp.status}`;
+          try {
+            const parsed = JSON.parse(text);
+            errorMessage = parsed.error || parsed.detail || errorMessage;
+          } catch {
+            // keep raw text
+          }
+          throw new Error(errorMessage);
+        }
+
+        if (!resp.body) {
+          throw new Error("Server returned an empty response body.");
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let sawTerminalEvent = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop()!;
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            if (line === "data: [DONE]") continue;
+
+            try {
+              const event = JSON.parse(line.slice(6));
+              const etype = event.type;
+              const edata = event.data;
+
+              if (etype === "thinking") {
+                const iteration = typeof event.iteration === "number" ? event.iteration : null;
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  const blocks = [...updated[last].thinkingBlocks];
+                  const content =
+                    iteration !== null &&
+                    lastThinkingIterationRef.current !== null &&
+                    iteration !== lastThinkingIterationRef.current
+                      ? `\n\n${edata.content || ""}`
+                      : edata.content || "";
+                  if (blocks.length > 0) {
+                    blocks[blocks.length - 1] = {
+                      ...blocks[blocks.length - 1],
+                      content: blocks[blocks.length - 1].content + content,
+                    };
+                  } else {
+                    blocks.push({ content: edata.content || "", isExpanded: true });
+                  }
+                  updated[last] = { ...updated[last], thinkingBlocks: blocks };
+                  return updated;
+                });
+                lastThinkingIterationRef.current = iteration;
+              }
+
+              if (etype === "tool_call_start") {
+                const rawName = edata.tool_name || "";
+                const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
+                const card: ToolCallCard = {
+                  callId: edata.call_id || `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                  toolName: cleanName,
+                  arguments: edata.arguments || {},
+                  status: "loading",
+                  result: null,
+                  error: null,
+                  executionTimeMs: 0,
+                  showInput: true,
+                };
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = {
+                    ...updated[last],
+                    toolCallCards: [...updated[last].toolCallCards, card],
+                  };
+                  return updated;
+                });
+              }
+
+              if (etype === "tool_call_result") {
+                const status = (edata.status === "success" || edata.status === "business_error")
+                  ? "success" as const
+                  : "error" as const;
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const cards = [...prev[last].toolCallCards];
+                  const directIdx = cards.findIndex((c) => c.callId === edata.call_id);
+                  const loadingIdx = [...cards].reverse().findIndex((c) => c.status === "loading");
+                  if (directIdx === -1 && loadingIdx === -1) return prev;
+                  const idx = directIdx !== -1 ? directIdx : cards.length - 1 - loadingIdx;
+                  cards[idx] = {
+                    ...cards[idx],
+                    status,
+                    result: edata.result || null,
+                    error: edata.error || null,
+                    executionTimeMs: edata.execution_time_ms || 0,
+                  };
+                  const updated = [...prev];
+                  updated[last] = { ...updated[last], toolCallCards: cards };
+                  return updated;
+                });
+              }
+
+              if (etype === "approval_required") {
+                sawTerminalEvent = true;
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const cards = [...prev[last].toolCallCards];
+                  const directIdx = cards.findIndex((c) => c.callId === edata.call_id);
+                  if (directIdx === -1) return prev;
+                  cards[directIdx] = {
+                    ...cards[directIdx],
+                    status: "approval_required",
+                    approval: edata.approval || null,
+                    result: edata.approval || null,
+                  };
+                  const updated = [...prev];
+                  updated[last] = { ...updated[last], toolCallCards: cards, isStreaming: false };
+                  return updated;
+                });
+                setIsStreaming(false);
+              }
+
+              if (etype === "text_delta") {
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = {
+                    ...updated[last],
+                    textContent: updated[last].textContent + (edata.content || ""),
+                  };
+                  return updated;
+                });
+              }
+
+              if (etype === "final_answer") {
+                sawTerminalEvent = true;
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = { ...updated[last], isStreaming: false };
+                  return updated;
+                });
+                setIsStreaming(false);
+              }
+
+              if (etype === "conversation_id") {
+                setConversationId(edata.conversation_id);
+              }
+
+              if (etype === "error") {
+                sawTerminalEvent = true;
+                setMessages((prev) => {
+                  const last = prev.length - 1;
+                  if (last < 0 || prev[last].role !== "assistant") return prev;
+                  const updated = [...prev];
+                  updated[last] = {
+                    ...updated[last],
+                    textContent: updated[last].textContent + `\n\n❌ ${edata.message}`,
+                    isStreaming: false,
+                  };
+                  return updated;
+                });
+                setIsStreaming(false);
+              }
+            } catch {
+              // skip malformed JSON
+            }
+          }
+        }
+
+        if (!sawTerminalEvent) {
+          setMessages((prev) => {
+            const last = prev.length - 1;
+            if (last < 0 || prev[last].role !== "assistant") return prev;
+            const updated = [...prev];
+            updated[last] = { ...updated[last], isStreaming: false };
+            return updated;
+          });
+          setIsStreaming(false);
+        }
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          setMessages((prev) => {
+            const last = prev.length - 1;
+            if (last < 0 || prev[last].role !== "assistant") return prev;
+            const updated = [...prev];
+            updated[last] = {
+              ...updated[last],
+              textContent: updated[last].textContent + `\n\n❌ Approval error: ${(err as Error).message}`,
+              isStreaming: false,
+              toolCallCards: updated[last].toolCallCards.map((card) =>
+                card.callId === callId ? { ...card, status: "error", error: (err as Error).message } : card,
+              ),
+            };
+            return updated;
+          });
+        }
+        setIsStreaming(false);
+      }
+    },
+    [conversationId, isStreaming],
+  );
+
   const newChat = useCallback(() => {
     abortRef.current?.abort();
+    lastThinkingIterationRef.current = null;
     setMessages([]);
     setConversationId(null);
     setIsStreaming(false);
@@ -258,6 +607,10 @@ export function useChat() {
           }
 
           if (msg.role === "assistant") {
+            if (msg.thinking_content) {
+              appendThinkingContent(lastMsg, msg.thinking_content, false);
+            }
+
             if (msg.content) {
               lastMsg.textContent += (lastMsg.textContent ? "\n\n" : "") + msg.content;
             }
@@ -295,12 +648,9 @@ export function useChat() {
               });
               lastMsg.toolCallCards.push(...newCards);
 
-              if (!msg.content) {
+              if (!msg.content && !msg.thinking_content) {
                 const toolNames = newCards.map((c: any) => c.toolName).join(", ");
-                lastMsg.thinkingBlocks.push({
-                  content: `Tiến hành gọi công cụ: ${toolNames}...`,
-                  isExpanded: false,
-                });
+                appendThinkingContent(lastMsg, `Tiến hành gọi công cụ: ${toolNames}...`, false);
               }
             }
           } else if (msg.role === "tool") {
@@ -322,6 +672,44 @@ export function useChat() {
               }
             }
           }
+        }
+      }
+
+      for (const pending of data.pending_approvals || []) {
+        let target = loaded
+          .filter((msg) => msg.role === "assistant")
+          .find((msg) => msg.toolCallCards.some((card) => card.callId === pending.call_id));
+
+        if (!target) {
+          target = {
+            role: "assistant",
+            content: "",
+            thinkingBlocks: [],
+            toolCallCards: [],
+            textContent: "",
+            isStreaming: false,
+            timestamp: "",
+          };
+          loaded.push(target);
+        }
+
+        const existing = target.toolCallCards.find((card) => card.callId === pending.call_id);
+        if (existing) {
+          existing.status = "approval_required";
+          existing.approval = pending.approval;
+          existing.result = pending.approval;
+        } else {
+          target.toolCallCards.push({
+            callId: pending.call_id,
+            toolName: pending.tool_name,
+            arguments: pending.arguments || {},
+            status: "approval_required",
+            result: pending.approval,
+            error: null,
+            executionTimeMs: 0,
+            showInput: true,
+            approval: pending.approval,
+          });
         }
       }
 
@@ -349,5 +737,6 @@ export function useChat() {
     switchProvider,
     toggleTab,
     loadConversation,
+    approveDecision,
   };
 }

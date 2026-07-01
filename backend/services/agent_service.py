@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from typing import AsyncGenerator
+from datetime import datetime, timedelta, timezone
 
 from core.event_emitter import EventEmitter
 from core.schemas import AgentEvent, AgentEventType, NormalizedMessage, NormalizedToolCall
@@ -36,13 +37,20 @@ class AgentEngine:
         user_message: str,
         provider: LLMProvider,
         history: list[dict],
+        approval_repo=None,
+        resume: bool = False,
     ) -> AsyncGenerator[AgentEvent, None]:
         start_time = time.monotonic()
         total_tool_calls = 0
         iteration = 0
 
         emitter = EventEmitter(session_id)
-        messages = build_messages(history, user_message, get_system_prompt())
+        messages = build_messages(
+            history,
+            user_message,
+            get_system_prompt(),
+            append_user=not resume,
+        )
         tools = self.skill_registry.get_tool_schemas()
 
         global_executed_tools = set()
@@ -59,6 +67,8 @@ class AgentEngine:
             iteration += 1
             pending_tool_calls: list[NormalizedToolCall] = []
             accumulated_text = ""
+            accumulated_thinking = ""
+            provider_error = None
 
             # --- Langfuse: Bắt đầu ghi nhận LLM Call ---
             model_name = getattr(provider, "model_name", "unknown")
@@ -73,6 +83,9 @@ class AgentEngine:
             async for response in provider.chat_completion(messages, tools):
                 if response.token_usage:
                     total_token_usage = response.token_usage
+
+                if response.provider_error:
+                    provider_error = response.provider_error
 
                 if response.tool_calls:
                     for tc in response.tool_calls:
@@ -96,6 +109,7 @@ class AgentEngine:
                     yield emitter.text_delta(response.text_content)
 
                 if response.thinking_content:
+                    accumulated_thinking += response.thinking_content
                     yield emitter.thinking(content=response.thinking_content, iteration=iteration)
 
             # --- Langfuse: Kết thúc LLM Call, ghi output ---
@@ -107,22 +121,33 @@ class AgentEngine:
                         for tc in pending_tool_calls
                     ] if pending_tool_calls else None,
                     usage=total_token_usage,
+                    thinking_content=accumulated_thinking or None,
+                    provider_error=provider_error,
                 )
 
             # Nếu có tool calls mà LLM lười không giải thích -> Tự động tạo reasoning
             if pending_tool_calls:
-                if not accumulated_text:
+                if not accumulated_text and not accumulated_thinking:
                     tool_names = ", ".join(tc.tool_name for tc in pending_tool_calls)
-                    yield emitter.thinking(content=f"Tiến hành gọi công cụ: {tool_names}...", iteration=iteration)
+                    fallback_thinking = f"Tiến hành gọi công cụ: {tool_names}..."
+                    accumulated_thinking += fallback_thinking
+                    yield emitter.thinking(content=fallback_thinking, iteration=iteration)
 
             if not pending_tool_calls:
-                if accumulated_text:
-                    messages.append(NormalizedMessage(role="assistant", content=accumulated_text))
+                if accumulated_text or accumulated_thinking:
+                    messages.append(
+                        NormalizedMessage(
+                            role="assistant",
+                            content=accumulated_text or None,
+                            thinking_content=accumulated_thinking or None,
+                        )
+                    )
                 break
 
             assistant_msg = NormalizedMessage(
                 role="assistant",
                 content=accumulated_text or None,
+                thinking_content=accumulated_thinking or None,
                 tool_calls=pending_tool_calls
             )
             messages.append(assistant_msg)
@@ -157,6 +182,50 @@ class AgentEngine:
                         error=result.error,
                         execution_time_ms=result.execution_time_ms,
                     )
+
+                if result.needs_approval:
+                    if approval_repo is None:
+                        yield emitter.error(
+                            message="Approval repository is not configured.",
+                            code="APPROVAL_REPOSITORY_MISSING",
+                        )
+                        return
+
+                    expires_at = (
+                        datetime.now(timezone.utc).replace(tzinfo=None)
+                        + timedelta(minutes=5)
+                    )
+                    approval_metadata = dict(result.approval_metadata or {})
+                    approval_metadata["expires_at"] = expires_at.isoformat()
+
+                    await approval_repo.create_pending(
+                        conversation_id=session_id,
+                        call_id=tc.call_id,
+                        tool_name=tc.tool_name,
+                        arguments=tc.arguments,
+                        approval_metadata=approval_metadata,
+                        expires_at=expires_at,
+                    )
+
+                    total_duration_ms = (time.monotonic() - start_time) * 1000
+                    if trace_ctx:
+                        trace_ctx.finalize(
+                            total_tool_calls=total_tool_calls,
+                            total_duration_ms=total_duration_ms,
+                            output="APPROVAL_REQUIRED",
+                        )
+                    if self.tracer:
+                        self.tracer.flush()
+
+                    yield emitter.approval_required(
+                        call_id=tc.call_id,
+                        tool_name=tc.tool_name,
+                        arguments=tc.arguments,
+                        approval=approval_metadata,
+                        updated_messages=messages[1:],
+                        iteration=iteration,
+                    )
+                    return
 
                 yield emitter.tool_call_result(
                     call_id=tc.call_id,

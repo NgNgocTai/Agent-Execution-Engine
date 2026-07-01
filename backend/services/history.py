@@ -1,6 +1,6 @@
 from core.schemas import NormalizedMessage, NormalizedToolCall
 
-MAX_HISTORY_MESSAGES = 80
+MAX_HISTORY_MESSAGES = 30
 
 
 def truncate_history(
@@ -22,6 +22,7 @@ def build_messages(
     history: list[dict],
     user_message: str,
     system_prompt: str,
+    append_user: bool = True,
 ) -> list[NormalizedMessage]:
     normalized_history = []
     for row in history:
@@ -40,6 +41,7 @@ def build_messages(
             NormalizedMessage(
                 role=row["role"],
                 content=row.get("content"),
+                thinking_content=row.get("thinking_content"),
                 tool_calls=tool_calls,
                 tool_call_id=row.get("tool_call_id"),
                 tool_name=row.get("name"),
@@ -49,5 +51,8 @@ def build_messages(
 
     system_msg = NormalizedMessage(role="system", content=system_prompt)
     recent = truncate_history(normalized_history)
+    if not append_user:
+        return [system_msg, *recent]
+
     user_msg = NormalizedMessage(role="user", content=user_message)
     return [system_msg, *recent, user_msg]

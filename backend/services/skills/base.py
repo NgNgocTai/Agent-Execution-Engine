@@ -16,6 +16,8 @@ class SkillResult(BaseModel):
     data: Any
     error: str | None = None
     execution_time_ms: float = 0.0
+    needs_approval: bool = False
+    approval_metadata: dict[str, Any] | None = None
 
     @property
     def success(self) -> bool:
