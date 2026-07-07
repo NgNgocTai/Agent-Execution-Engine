@@ -1,0 +1,237 @@
+case_id,name,type,provider,model,comparison_group,passed,failed_checks,warnings,quality_provider,quality_enabled,groundedness_score,correctness_score,latency_ms,tool_calls,approval_events,final_answer
+RAGAS-ALARM-CELL-DOWN-REAL-001,Frozen real snapshot - Cell Down alarm,ragas_quality,openai,openai-provider-demo,alarm-cell-down,True,,,ragas,True,0.5,0.45563072039757024,,1,0,"**Kết quả tra cứu cảnh báo “Cell Down”**
+
+| # | Alarm ID | Thiết bị | IP | Loại thiết bị | Nhà cung cấp | Trạm | Thời gian báo | Trạng thái | Mức độ | Giá trị (val) | Ngưỡng (thr) | Trạng thái cảnh báo (st) |
+|---|----------|----------|----|----------------|--------------|------|----------------|------------|--------|--------------|--------------|--------------------------|
+| 1 | ALM‑0002997717 | eNodeB‑SL‑Station‑005‑002117 | 10.10.8.86 | eNodeB | Fortinet | SL‑Station‑005 | 2026‑06‑30 23:59:32 | active | Critical | 88 | 52 | RAISED |
+| 2 | ALM‑0002934624 | RRU‑DN‑Station‑009‑006119 | 10.26.24.24 | RRU | Cisco | DN‑Station‑009 | 2026‑06‑30 23:57:14 | active | Critical | 50 | 83 | ACK |
+| 3 | ALM‑0002999529 | BBU‑HUE‑Station‑004‑001530 | 10.8.6.7 | BBU | Vsmart | HUE‑Station‑004 | 2026‑06‑30 23:52:03 | archived | Critical | 37 | 78 | RAISED |
+| 4 | ALM‑0002967885 | BTS‑NA‑Station‑005‑005222 | 10.22.20.143 | BTS | VNPT Technology | NA‑Station‑005 | 2026‑06‑30 23:52:08 | active | Critical | 93 | 53 | ACK |
+| 5 | ALM‑0002988962 | gNodeB‑NA‑Station‑002‑001357 | 10.7.5.88 | gNodeB | Ericsson | NA‑Station‑002 | 2026‑06‑30 23:55:28 | archived | Warning | 74 | 85 | ACK |
+| 6 | ALM‑0002985776 | eNodeB‑DN‑Station‑009‑006292 | 10.26.24.197 | eNodeB | VNPT Technology | DN‑Station‑009 | 2026‑06‑30 23:40:40 | archived | Major | 78 | 70 | RAISED |
+| 7 | ALM‑0002952122 | BBU‑HN‑Station‑008‑006361 | 10.27.25.12 | BBU | Vsmart | HN‑Station‑008 | 2026‑06‑30 23:45:11 | archived | Warning | 27 | 93 | CLEARED |
+| 8 | ALM‑0002943769 | BBU‑HUE‑Station‑002‑006686 | 10.28.26.83 | BBU | ZTE | HUE‑Station‑002 | 2026‑06‑30 23:38:06 | archived | Critical | 11 | 71 | RAISED |
+| 9 | ALM‑0002940696 | BTS‑LD‑Station‑005‑000850 | 10.5.3.89 | BTS | ZTE | LD‑Station‑005 | 2026‑06‑30 23:35:41 | active | Critical | 23 | 78 | CLEARED |
+|10| ALM‑0002955365 | eNodeB‑DL‑Station‑009‑007391 | 10.31.29.26 | eNodeB | Vsmart | DL‑Station‑009 | 2026‑06‑30 23:29:15 | active | Critical | 43 | 62 | RAISED |
+|…| … | … | … | … | … | … | … | … | … | … | … | … |
+
+> **Lưu ý:** Hệ thống chỉ hiển thị 50 cảnh báo mới nhất (trong tổng 17 163 cảnh báo “Cell Down” trong vòng 10 phút gần nhất) để tránh quá tải bộ nhớ.
+
+### Thông tin chung của loại cảnh báo
+- **Mã lỗi:** RAN‑0001  
+- **Tên:** Cell Down  
+- **Miêu tả:** “Trả báo phát sóng mất hoàn toàn”  
+- **Domain:** RAN  
+- **Mức độ mặc định:** Critical  
+
+### Hành động gợi ý
+1. **Kiểm tra các thiết bị có trạng thái `active` (chưa được giải quyết),** đặc biệt là những thiết bị có giá trị `val` cao hơn ngưỡng `thr` và mức độ `Critical`.  
+2. **Liên hệ nhà cung cấp** (như Fortinet, Cisco, Ericsson, …) cho các thiết bị đã được ghi chú “phối hợp với vendor để xử lý”.  
+3. **Xác minh lại cấu hình và log** đối với các thiết bị `RRU`, `eNodeB`, `gNodeB` có `st = RAISED` hoặc `ACK` nhưng chưa có thời gian giải quyết.  
+4. **Lên kế hoạch bảo trì** cho các thiết bị có tần suất `Cell Down` cao (ví dụ: BBU‑DNA‑Station‑004, eNodeB‑DN‑Station‑007) để tránh ảnh hưởng tới dịch vụ.  
+
+Nếu cần chi tiết hơn (ví dụ: danh sách đầy đủ 50 cảnh báo, hoặc lọc theo trạm, nhà cung cấp, mức độ), hãy cho biết tiêu chí lọc để tôi truy vấn lại."
+RAGAS-INVENTORY-IP-REAL-001,Tra giúp tôi thông tin inventory của IP 10.10.8.86,ragas_quality,openai,openai-provider-demo,inventory-ip-found,True,,,ragas,True,0.7647058823529411,0.662719348402094,,1,0,"**Thông tin inventory cho IP 10.10.8.86**
+
+| Trường | Giá trị |
+|--------|---------|
+| **Device ID** | DEV-002117 |
+| **Tên thiết bị** | eNodeB‑SL‑Station‑005‑002117 |
+| **Loại thiết bị** | eNodeB |
+| **IP** | 10.10.8.86 |
+| **Vendor** | Fortinet |
+| **Station** | SL‑Station‑005 |
+| **Số alarm đang active** | **20** |
+
+### Các alarm đang active (một phần)
+
+| Alarm ID | Error Code | Severity | Thời gian tạo |
+|----------|------------|----------|---------------|
+| ALM-0002997717 | RAN-0001 | Critical | 2026‑06‑30 23:59:32 |
+| ALM-0002837924 | RAN-0004 | Major | 2026‑06‑29 08:18:57 |
+| ALM-0002778081 | RAN-0008 | Warning | 2026‑06‑28 13:05:04 |
+| ALM-0002636835 | RAN-0001 | Critical | 2026‑06‑27 16:04:12 |
+| ... (còn 15 alarm khác) |
+
+**Ghi chú:**  
+- Thiết bị có lượng alarm active tương đối cao (20).  
+- Các alarm chủ yếu thuộc domain **RAN** với mức độ **Critical** và **Major**.  
+
+Nếu bạn cần chi tiết đầy đủ của toàn bộ 20 alarm, hoặc muốn phân tích nguyên nhân, thống kê theo severity, hoặc thực hiện remediate, hãy cho tôi biết!"
+RAGAS-NODE-HEALTH-ANHVHN-REAL-001,Kiểm tra RAM và CPU node anhvhn.duckdns.org giúp tôi,ragas_quality,openai,openai-provider-demo,node-health-anhvhn,True,,,ragas,True,1.0,0.6542880268352144,,1,0,"**Kết quả kiểm tra node `anhvhn.duckdns.org` (dry run – chỉ hiển thị lệnh, không thực thi)**  
+
+| Thông số | Giá trị | Ngưỡng | Trạng thái |
+|----------|---------|--------|------------|
+| RAM (%)  | **17.3 %** | 80 % | **Bình thường** |
+| CPU (%)  | **1.1 %**  | 80 % | **Bình thường** |
+| Load 1 phút | 0.34 | — | — |
+| Disk (%) | 60.5 % | — | — |
+
+**Đánh giá:**  
+- Cả RAM và CPU đều **không vượt ngưỡng** (ram_high = false, cpu_high = false).  
+- Không cần thực hiện hành động nào (không restart container, không đọc log).
+
+**Hành động:**  
+- `action: none` – không có lệnh nào được tạo ra vì cả hai chỉ số đều trong mức an toàn.  
+
+Nếu bạn muốn thực hiện kiểm tra khác (ví dụ: thay đổi ngưỡng, lấy log container, hoặc kiểm tra node khác), hãy cho tôi biết."
+RAGAS-DEMO-INVENTORY-DEVICE-REAL-001,1. Tra giúp tôi thông tin inventory của thiết bị eNodeB-SL-Station-005-002117. T,ragas_quality,openai,openai-provider-demo,demo-inventory-device,True,,,ragas,True,0.9,0.9367844955213641,,1,0,"**Thông tin inventory (theo kết quả tool):**
+
+| Trường | Giá trị |
+|--------|---------|
+| **Device ID** | DEV-002117 |
+| **Tên thiết bị** | eNodeB‑SL‑Station‑005‑002117 |
+| **Loại thiết bị** | eNodeB |
+| **IP** | 10.10.8.86 |
+| **Vendor** | Fortinet |
+| **Station** | SL‑Station‑005 |
+| **Số alarm đang active** | 20 |
+| **Alarm active (mẫu)** | `ALM-0002997717 (Critical, RAN‑0001)`, `ALM-0002837924 (Major, RAN‑0004)`, `ALM-0002778081 (Warning, RAN‑0008)` … (tổng 20 alarm) |
+
+*Nguồn: kết quả trả về từ tool `device_inventory_lookup`.*"
+RAGAS-DEMO-INVENTORY-IP-REAL-001,Tra giúp tôi thông tin inventory của IP 10.26.24.24. Nếu có active alarms thì li,ragas_quality,openai,openai-provider-demo,demo-inventory-ip,True,,,ragas,True,0.9333333333333333,0.9770022928243717,,1,0,"**Thông tin inventory (IP 10.26.24.24)**  
+
+| Trường | Giá trị |
+|--------|---------|
+| **Device ID** | DEV‑006119 |
+| **Tên thiết bị** | RRU‑DN‑Station‑009‑006119 |
+| **Loại thiết bị** | RRU |
+| **IP** | 10.26.24.24 |
+| **Vendor** | Cisco |
+| **Station** | DN‑Station‑009 |
+| **Số alarm đang active** | 20 |
+
+**5 alarm tiêu biểu (được chọn ngẫu nhiên trong số 20 alarm active):**
+
+| Alarm ID | Severity | Error Code | Thời gian tạo |
+|----------|----------|------------|---------------|
+| ALM‑0002934624 | Critical | RAN‑0001 | 2026‑06‑30 23:57:14 |
+| ALM‑0002957442 | Warning  | RAN‑0008 | 2026‑06‑30 15:58:21 |
+| ALM‑0002916685 | Major    | RAN‑0003 | 2026‑06‑30 10:22:38 |
+| ALM‑0002810826 | Warning  | RAN‑0005 | 2026‑06‑29 20:47:34 |
+| ALM‑0002845643 | Warning  | RAN‑0006 | 2026‑06‑29 18:57:17 |
+
+*Nguồn: Kết quả trả về từ tool `device_inventory_lookup`.*"
+RAGAS-DEMO-CELL-DOWN-7D-REAL-001,Kiểm tra cảnh báo Cell Down trong 7 ngày qua. Tóm tắt tổng quan và liệt kê tối đ,ragas_quality,openai,openai-provider-demo,demo-alarm-cell-down-7d,True,,,ragas,True,0.7692307692307693,0.5072664668956663,,1,0,"**Tóm tắt cảnh báo “Cell Down” trong 7 ngày qua (10 080 phút)**  
+
+| Thông tin | Giá trị |
+|-----------|---------|
+| **Số alarm “Cell Down” trong kho** | 2 796 (tổng số cảnh báo thuộc loại này trong cửa sổ thời gian) |
+| **Số alarm được hiển thị chi tiết** | 50 (hệ thống chỉ đưa ra 50 bản ghi mới nhất để tránh quá tải) |
+| **Domain** | RAN |
+| **Mức độ nghiêm trọng mặc định** | Critical |
+
+**5 alarm tiêu biểu (được chọn trong 50 bản ghi mới nhất)**  
+
+| Alarm ID | Thiết bị (tên) | Loại thiết bị | Vendor | Severity | Thời gian tạo | Trạng thái |
+|----------|----------------|---------------|--------|----------|----------------|------------|
+| ALM‑0002997717 | eNodeB‑SL‑Station‑005‑002117 | eNodeB | Fortinet | Critical | 2026‑06‑30 23:59:32 | active |
+| ALM‑0002934624 | RRU‑DN‑Station‑009‑006119 | RRU | Cisco | Critical | 2026‑06‑30 23:57:14 | active |
+| ALM‑0002986242 | BBU‑LC‑Station‑008‑005607 | BBU | Ericsson | Critical | 2026‑06‑30 23:55:29 | archived (đã giải quyết) |
+| ALM‑0002988962 | gNodeB‑NA‑Station‑002‑001357 | gNodeB | Ericsson | Warning | 2026‑06‑30 23:55:28 | archived (đã giải quyết) |
+| ALM‑0002902333 | eNodeB‑BDH‑Station‑009‑000838 | eNodeB | ZTE | Critical | 2026‑06‑30 23:55:22 | archived (đã giải quyết) |
+
+*Các trường “status” có giá trị **active** (vẫn đang mở) hoặc **archived** (đã được giải quyết).*
+
+**Nguồn:** Kết quả trả về từ tool `noc_alarm_enrichment` (truy vấn loại alarm “CELL_DOWN” trong 7 ngày)."
+RAGAS-DEMO-LOS-7D-REAL-001,"Kiểm tra cảnh báo LOS trong 7 ngày qua. Chỉ nêu error info, số lượng tool trả về",ragas_quality,openai,openai-provider-demo,demo-alarm-los-7d,True,,,ragas,True,0.9047619047619048,0.3150436704577748,,1,0,"**Cảnh báo LOS (Loss of Signal) trong 7 ngày qua**
+
+- **Error info (từ hệ thống):**  
+  - **Mã lỗi:** TRA‑0009  
+  - **Tên:** LOS  
+  - **Mô tả:** “Mất tín hiệu quang”  
+  - **Domain:** TRANSPORT  
+  - **Mức độ severity mặc định:** Critical  
+
+- **Số lượng alarm được trả về:** 3 291 (hệ thống chỉ hiển thị chi tiết 50 alarm mới nhất để tránh quá tải).  
+
+- **5 alarm tiêu biểu (trong 50 bản ghi mới nhất):**
+
+| Alarm ID | Thiết bị (tên) | Loại thiết bị | Vendor | Severity | Thời gian tạo | Trạng thái |
+|----------|----------------|---------------|--------|----------|----------------|------------|
+| ALM‑0002933163 | OTN‑BD‑Station‑003‑006487 | OTN | Nokia | Major | 2026‑06‑30 23:59:50 | active |
+| ALM‑0002918423 | OLT‑CM‑Station‑008‑003896 | OLT | Samsung | Minor | 2026‑06‑30 23:58:55 | archived (đã giải quyết) |
+| ALM‑0002915260 | ONU‑GL‑Station‑008‑005382 | ONU | Vsmart | Critical | 2026‑06‑30 23:58:15 | archived |
+| ALM‑0002919092 | MW_Radio‑GL‑Station‑008‑004195 | MW_Radio | — (không có enrichment) | Critical | 2026‑06‑30 23:57:56 | archived |
+| ALM‑0002973950 | OLT‑CT‑Station‑001‑003530 | OLT | Samsung | Critical | 2026‑06‑30 23:57:55 | active |
+
+*“Trạng thái” = *active* (vẫn chưa giải quyết) hoặc *archived* (đã giải quyết).  
+
+**Nguồn:** Kết quả trả về từ tool `noc_alarm_enrichment` (truy vấn loại alarm “LOS” trong 7 ngày)."
+RAGAS-DEMO-DIAMETER-7D-REAL-001,"Kiểm tra cảnh báo Diameter Peer Down trong 7 ngày qua. Trả lời ngắn, chỉ dựa trê",ragas_quality,openai,openai-provider-demo,demo-alarm-diameter-7d,True,,,ragas,True,0.7647058823529411,0.35002645316068937,,1,0,"**Diameter Peer Down (7 ngày qua)**  
+
+- **Error info (từ hệ thống):**  
+  - **Mã:** COR‑0016  
+  - **Tên:** Diameter Peer Down  
+  - **Mô tả:** “Peer Diameter mất kết nối”  
+  - **Domain:** CORE  
+  - **Severity mặc định:** Major  
+
+- **Số alarm tổng:** 4 493 (hệ thống chỉ hiển thị 50 bản ghi mới nhất).  
+
+- **5 alarm tiêu biểu (trong 50 bản ghi mới nhất):**  
+
+| Alarm ID | Thiết bị (tên) | Loại | Vendor | Severity | Thời gian tạo | Trạng thái |
+|----------|----------------|------|--------|----------|----------------|------------|
+| ALM‑0002992245 | SMF‑BN‑Station‑005‑005626 | SMF | Dell | Major | 2026‑06‑30 23:59:47 | active |
+| ALM‑0002995900 | PGW‑AG‑Station‑006‑000551 | PGW | Mavenir | Major | 2026‑06‑30 23:59:33 | archived |
+| ALM‑0002954456 | SGW‑NA‑Station‑009‑004105 | SGW | VNPT Technology | Major | 2026‑06‑30 23:59:24 | archived |
+| ALM‑0002947292 | SGW‑TG‑Station‑002‑007235 | SGW | Mavenir | Minor | 2026‑06‑30 23:59:08 | active |
+| ALM‑0002916305 | SGW‑BRVT‑Station‑002‑003474 | SGW | Cisco | Major | 2026‑06‑30 23:58:58 | active |
+
+*“Trạng thái” = **active** (chưa giải quyết) hoặc **archived** (đã giải quyết).*  
+
+**Nguồn:** Kết quả trả về từ tool `noc_alarm_enrichment` (truy vấn loại alarm “DIAMETER PEER DOWN” trong 7 ngày)."
+RAGAS-DEMO-SIGNAL-LOSS-FRAME-7D-REAL-001,"Kiểm tra cảnh báo Signal Loss trong 7 ngày qua, dùng regex frame=(\d+). Nếu khôn",ragas_quality,openai,openai-provider-demo,demo-alarm-signal-loss-frame-7d,True,,,ragas,True,0.8333333333333334,0.46488217227885625,,1,0,"**Signal Loss (7 ngày qua)**  
+
+- **Error info (từ hệ thống):**  
+  - **Mã:** BRO‑0045  
+  - **Tên:** Signal Loss  
+  - **Mô tả:** “Mất tín hiệu đầu vào”  
+  - **Domain:** BROADCAST  
+  - **Severity mặc định:** Critical  
+
+- **Số alarm tổng:** 3 731 (hệ thống chỉ hiển thị 50 bản ghi mới nhất).  
+
+- **Kết quả regex `frame=(\d+)`:** Không có dòng log nào chứa chuỗi **frame=** → **không tìm thấy frame** trong các alarm trả về.  
+
+- **5 alarm tiêu biểu (trong 50 bản ghi mới nhất):**  
+
+| Alarm ID | Thiết bị (tên) | Loại | Vendor | Severity | Thời gian tạo | Trạng thái |
+|----------|----------------|------|--------|----------|----------------|------------|
+| ALM‑0002963054 | Encoder‑LD‑Station‑001‑005859 | Encoder | Cisco | Critical | 2026‑06‑30 23:59:46 | archived |
+| ALM‑0002954346 | Multiplexer‑SL‑Station‑007‑005692 | Multiplexer | HPE | Critical | 2026‑06‑30 23:58:43 | archived |
+| ALM‑0002998427 | Multiplexer‑BTH‑Station‑008‑006133 | Multiplexer | Nokia | Critical | 2026‑06‑30 23:57:53 | archived |
+| ALM‑0002917392 | Multiplexer‑HT‑Station‑002‑006856 | Multiplexer | Nokia | Critical | 2026‑06‑30 23:57:47 | archived |
+| ALM‑0002944313 | Multiplexer‑LD‑Station‑003‑003112 | Multiplexer | Dell | Critical | 2026‑06‑30 23:57:10 | active (chưa giải quyết) |
+
+*“Trạng thái” = **archived** (đã giải quyết) hoặc **active** (chưa giải quyết).*
+
+**Nguồn:** Kết quả trả về từ tool `noc_alarm_enrichment` (truy vấn loại alarm “SIGNAL LOSS” trong 7 ngày, kèm regex `frame=(\d+)`)."
+RAGAS-DEMO-STATS-SEVERITY-7D-REAL-001,Thống kê alarm trong 7 ngày qua theo severity. Tóm tắt các nhóm severity và khôn,ragas_quality,openai,openai-provider-demo,demo-stats-severity-7d,True,,,ragas,True,1.0,0.6252165364193454,,1,0,"**Tóm tắt thống kê alarm (7 ngày, nhóm theo severity)**  
+
+| **Severity** | **Số alarm** |
+|--------------|--------------|
+| **Critical** | 24 440 |
+| **Major**    | 56 418 |
+| **Warning**  | 33 263 |
+| **Minor**    | 35 556 |
+| **Tổng**     | 149 677 |
+
+- **Alarm đang active:** 37 610  
+- **Alarm đã archive:** 112 067  
+
+(Đây là tóm tắt ngắn gọn, không liệt kê chi tiết các alarm.)  
+
+**Nguồn:** Kết quả trả về từ tool `alarm_statistics` (cửa sổ 7 ngày, group_by = severity)."
+RAGAS-DEMO-STATS-ERROR-CODE-7D-REAL-001,"Thống kê alarm trong 7 ngày qua theo error_code, lấy top 5 error_code nhiều cảnh",ragas_quality,openai,openai-provider-demo,demo-stats-error-code-7d,True,,,ragas,True,1.0,0.9763045451656559,,1,0,"**Top 5 error_code (số lượng alarm) trong 7 ngày qua**
+
+| # | Error code | Tên lỗi | Số alarm |
+|---|------------|--------|----------|
+| 1 | COR‑0019 | License Threshold | 4 615 |
+| 2 | COR‑0020 | HSS Overload | 4 534 |
+| 3 | COR‑0016 | Diameter Peer Down | 4 490 |
+| 4 | COR‑0018 | PFCP Association Lost | 4 484 |
+| 5 | COR‑0015 | S1 Link Down | 4 459 |
+
+**Nguồn:** Kết quả trả về từ tool `alarm_statistics` (cửa sổ 7 ngày, group_by = error_code, top_n = 5)."

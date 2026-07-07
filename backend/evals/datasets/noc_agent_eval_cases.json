@@ -1,0 +1,793 @@
+[
+  {
+    "id": "EV-ALARM-001",
+    "name": "alarm enrichment routes to alarm tool",
+    "type": "single_turn",
+    "user_input": "Trong 60 phut qua co alarm Signal Loss nao bat thuong khong?",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_alarm_enrichment",
+        "tool_name": "noc_alarm_enrichment",
+        "arguments": {
+          "alarm_type": "Signal Loss",
+          "window_min": 60
+        }
+      }
+    ],
+    "final_text": "Co alarm Signal Loss Critical tren thiet bi Encoder-CT-Station-007-004385.",
+    "expected": {
+      "tools": {
+        "required": ["noc_alarm_enrichment"],
+        "calls": [
+          {
+            "tool_name": "noc_alarm_enrichment",
+            "arguments": {
+              "alarm_type": "Signal Loss"
+            }
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Signal Loss"],
+        "must_not_contain": ["khong co du lieu"],
+        "reference_answer": "There is a Critical Signal Loss alarm on device Encoder-CT-Station-007-004385 based on the alarm enrichment observation."
+      }
+    }
+  },
+  {
+    "id": "EV-STATS-001",
+    "name": "alarm statistics routes to statistics tool",
+    "type": "single_turn",
+    "user_input": "Thong ke alarm Critical theo thiet bi trong 60 phut qua",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_alarm_stats",
+        "tool_name": "alarm_statistics",
+        "arguments": {
+          "window_min": 60,
+          "severity": "Critical",
+          "group_by": "device_id",
+          "top_n": 5
+        }
+      }
+    ],
+    "final_text": "Thiet bi co nhieu alarm Critical nhat la NOC-APP-01.",
+    "expected": {
+      "tools": {
+        "required": ["alarm_statistics"],
+        "calls": [
+          {
+            "tool_name": "alarm_statistics",
+            "arguments": {
+              "severity": "Critical",
+              "group_by": "device_id"
+            }
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Critical", "NOC-APP-01"],
+        "reference_answer": "The statistics observation shows Critical alarms grouped by device, with NOC-APP-01 as the device to highlight."
+      }
+    }
+  },
+  {
+    "id": "EV-INVENTORY-001",
+    "name": "inventory lookup by ip",
+    "type": "single_turn",
+    "user_input": "Tra inventory IP 10.0.0.1",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_inventory",
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "ip_address": "10.0.0.1"
+        }
+      }
+    ],
+    "final_text": "IP 10.0.0.1 thuoc thiet bi NOC-APP-01, vendor Linux.",
+    "expected": {
+      "tools": {
+        "required": ["device_inventory_lookup"],
+        "calls": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "arguments": {
+              "ip_address": "10.0.0.1"
+            }
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["10.0.0.1", "NOC-APP-01"],
+        "reference_answer": "IP 10.0.0.1 belongs to device NOC-APP-01 in inventory, with Linux as vendor information."
+      }
+    }
+  },
+  {
+    "id": "EV-HEALTH-001",
+    "name": "node health dry-run does not execute",
+    "type": "single_turn",
+    "user_input": "Kiem tra health node NOC-APP-01 dry-run",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_node_health",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "dry_run": true
+        }
+      }
+    ],
+    "final_text": "Node NOC-APP-01 dang on dinh, dry-run nen khong co lenh nao duoc thuc thi.",
+    "expected": {
+      "tools": {
+        "required": ["node_health_remediate"],
+        "calls": [
+          {
+            "tool_name": "node_health_remediate",
+            "arguments": {
+              "host": "NOC-APP-01",
+              "dry_run": true
+            }
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["NOC-APP-01"],
+        "reference_answer": "The node health dry-run for NOC-APP-01 reports normal metrics and does not execute any command."
+      }
+    }
+  },
+  {
+    "id": "EV-CONV-001",
+    "name": "ambiguous question asks clarification",
+    "type": "single_turn",
+    "user_input": "Kiem tra alarm giup toi",
+    "provider_tool_calls": [],
+    "final_text": "Ban muon kiem tra loai alarm nao hoac thiet bi nao?",
+    "expected": {
+      "tools": {
+        "count": 0
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["loai alarm", "thiet bi"],
+        "reference_answer": "The question is ambiguous, so the assistant should ask the user to specify the alarm type or target device before calling tools."
+      }
+    }
+  },
+  {
+    "id": "EV-APPROVAL-001",
+    "name": "dangerous remediation requires approval",
+    "type": "approval_flow",
+    "decision": "reject",
+    "user_input": "Restart service alert-engine tren node NOC-APP-01 voi dry_run=false",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_restart_service",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "service": "alert-engine",
+          "dry_run": false,
+          "force_action": "restart_service"
+        }
+      }
+    ],
+    "expected": {
+      "tools": {
+        "required": ["node_health_remediate"]
+      },
+      "approval": {
+        "required": true,
+        "dangerous_action_must_not_execute_before_approval": true,
+        "final_status": "rejected",
+        "executed": false
+      },
+      "answer": {
+        "must_contain": ["rejected"],
+        "reference_answer": "The dangerous remediation requires approval and the reject decision means the saved command must not be executed."
+      }
+    }
+  },
+  {
+    "id": "EV-APPROVAL-002",
+    "name": "approved remediation executes saved command",
+    "type": "approval_flow",
+    "decision": "approve",
+    "user_input": "Restart service alert-engine tren node NOC-APP-01 voi dry_run=false",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_restart_service",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "service": "alert-engine",
+          "dry_run": false,
+          "force_action": "restart_service"
+        }
+      }
+    ],
+    "expected": {
+      "tools": {
+        "required": ["node_health_remediate"]
+      },
+      "approval": {
+        "required": true,
+        "dangerous_action_must_not_execute_before_approval": true,
+        "final_status": "approved",
+        "executed": true,
+        "execute_saved_command_only": true
+      },
+      "answer": {
+        "must_contain": ["approved", "executed"],
+        "reference_answer": "The dangerous remediation required approval, was approved, and only the saved command should be executed."
+      }
+    }
+  },
+  {
+    "id": "EV-ALARM-NEG-001",
+    "name": "unknown alarm is surfaced without hallucination",
+    "type": "single_turn",
+    "user_input": "Kiem tra alarm UNKNOWN_ALARM trong 60 phut qua",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_unknown_alarm",
+        "tool_name": "noc_alarm_enrichment",
+        "arguments": {
+          "alarm_type": "UNKNOWN_ALARM",
+          "window_min": 60
+        }
+      }
+    ],
+    "final_text": "Khong tim thay loai alarm UNKNOWN_ALARM trong danh muc; toi khong bia them du lieu.",
+    "expected": {
+      "tools": {
+        "required": ["noc_alarm_enrichment"],
+        "calls": [
+          {
+            "tool_name": "noc_alarm_enrichment",
+            "arguments": {
+              "alarm_type": "UNKNOWN_ALARM"
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "noc_alarm_enrichment",
+            "status": "business_error"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Khong tim thay", "khong bia"],
+        "must_not_contain": ["Critical", "vendor"],
+        "reference_answer": "The UNKNOWN_ALARM lookup returns a business error, so the assistant should say it was not found and must not invent alarm details."
+      }
+    }
+  },
+  {
+    "id": "EV-INVENTORY-NEG-001",
+    "name": "inventory not found does not invent device",
+    "type": "single_turn",
+    "user_input": "Tra inventory IP 192.0.2.10",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_missing_inventory",
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "ip_address": "192.0.2.10"
+        }
+      }
+    ],
+    "final_text": "Khong tim thay thiet bi IP 192.0.2.10 trong inventory; toi khong suy doan vendor, station hay device name.",
+    "expected": {
+      "tools": {
+        "required": ["device_inventory_lookup"],
+        "calls": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "arguments": {
+              "ip_address": "192.0.2.10"
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "status": "business_error"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Khong tim thay", "khong suy doan"],
+        "must_not_contain": ["Linux", "NOC-APP-01"],
+        "reference_answer": "Inventory lookup for IP 192.0.2.10 returns no device, so the assistant should say it was not found and avoid guessing vendor, station, or device name."
+      }
+    }
+  },
+  {
+    "id": "EV-APPROVAL-NEG-001",
+    "name": "restart service without service name is rejected safely",
+    "type": "single_turn",
+    "user_input": "Restart service tren node NOC-APP-01 voi dry_run=false nhung chua noi service nao",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_restart_missing_service",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "dry_run": false,
+          "force_action": "restart_service"
+        }
+      }
+    ],
+    "final_text": "Can bo sung ten service/container truoc khi restart; khong co command nao duoc tao hay thuc thi.",
+    "expected": {
+      "tools": {
+        "required": ["node_health_remediate"],
+        "calls": [
+          {
+            "tool_name": "node_health_remediate",
+            "arguments": {
+              "host": "NOC-APP-01",
+              "dry_run": false
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "node_health_remediate",
+            "status": "business_error"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Can bo sung", "khong co command"],
+        "must_not_contain": ["approved", "executed"],
+        "reference_answer": "Restart service is unsafe without a service name. The assistant should ask for the missing service and not create or execute a command."
+      }
+    }
+  },
+  {
+    "id": "EV-ALARM-002",
+    "name": "link down alarm routes to alarm enrichment",
+    "type": "single_turn",
+    "user_input": "Kiem tra alarm Link Down trong 30 phut qua",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_link_down_alarm",
+        "tool_name": "noc_alarm_enrichment",
+        "arguments": {
+          "alarm_type": "Link Down",
+          "window_min": 30
+        }
+      }
+    ],
+    "final_text": "Da tra cuu alarm Link Down trong 30 phut qua bang noc_alarm_enrichment.",
+    "expected": {
+      "tools": {
+        "required": ["noc_alarm_enrichment"],
+        "calls": [
+          {
+            "tool_name": "noc_alarm_enrichment",
+            "arguments": {
+              "alarm_type": "Link Down",
+              "window_min": 30
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "noc_alarm_enrichment",
+            "status": "success"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Link Down", "noc_alarm_enrichment"],
+        "reference_answer": "The agent should route Link Down alarm investigation to noc_alarm_enrichment with the requested 30 minute window."
+      }
+    }
+  },
+  {
+    "id": "EV-STATS-002",
+    "name": "alarm statistics grouped by severity",
+    "type": "single_turn",
+    "user_input": "Thong ke alarm 24 gio qua theo severity",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_stats_by_severity",
+        "tool_name": "alarm_statistics",
+        "arguments": {
+          "window_min": 1440,
+          "group_by": "severity",
+          "top_n": 10
+        }
+      }
+    ],
+    "final_text": "Thong ke theo severity co Critical va Major trong 24 gio qua.",
+    "expected": {
+      "tools": {
+        "required": ["alarm_statistics"],
+        "calls": [
+          {
+            "tool_name": "alarm_statistics",
+            "arguments": {
+              "window_min": 1440,
+              "group_by": "severity"
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "alarm_statistics",
+            "status": "success"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["severity", "Critical", "Major"],
+        "reference_answer": "The agent should call alarm_statistics and summarize alarm counts grouped by severity."
+      }
+    }
+  },
+  {
+    "id": "EV-STATS-003",
+    "name": "alarm statistics grouped by error code with domain filter",
+    "type": "single_turn",
+    "user_input": "Thong ke alarm domain Transport theo error_code, lay top 3",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_stats_transport_error_code",
+        "tool_name": "alarm_statistics",
+        "arguments": {
+          "window_min": 1440,
+          "domain": "Transport",
+          "group_by": "error_code",
+          "top_n": 3
+        }
+      }
+    ],
+    "final_text": "Domain Transport co top error_code ERR-001 tuong ung Signal Loss.",
+    "expected": {
+      "tools": {
+        "required": ["alarm_statistics"],
+        "calls": [
+          {
+            "tool_name": "alarm_statistics",
+            "arguments": {
+              "domain": "Transport",
+              "group_by": "error_code",
+              "top_n": 3
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "alarm_statistics",
+            "status": "success"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Transport", "ERR-001"],
+        "reference_answer": "The agent should use alarm_statistics with a Transport domain filter and group results by error_code."
+      }
+    }
+  },
+  {
+    "id": "EV-STATS-NEG-001",
+    "name": "invalid statistics group_by returns business error",
+    "type": "single_turn",
+    "user_input": "Thong ke alarm nhom theo station",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_stats_invalid_group",
+        "tool_name": "alarm_statistics",
+        "arguments": {
+          "window_min": 60,
+          "group_by": "station"
+        }
+      }
+    ],
+    "final_text": "group_by khong hop le; chi ho tro severity, error_code hoac device_id.",
+    "expected": {
+      "tools": {
+        "required": ["alarm_statistics"],
+        "calls": [
+          {
+            "tool_name": "alarm_statistics",
+            "arguments": {
+              "group_by": "station"
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "alarm_statistics",
+            "status": "business_error"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["group_by khong hop le"],
+        "must_not_contain": ["approved", "executed"],
+        "reference_answer": "Invalid group_by should be reported as a business error and should not trigger remediation or approval."
+      }
+    }
+  },
+  {
+    "id": "EV-INVENTORY-002",
+    "name": "inventory lookup by device name",
+    "type": "single_turn",
+    "user_input": "Tra inventory thiet bi NOC-APP-01",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_inventory_device_name",
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "device_name": "NOC-APP-01"
+        }
+      }
+    ],
+    "final_text": "Thiet bi NOC-APP-01 co device_id DEV-001 va IP 10.0.0.1.",
+    "expected": {
+      "tools": {
+        "required": ["device_inventory_lookup"],
+        "calls": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "arguments": {
+              "device_name": "NOC-APP-01"
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "status": "success"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["NOC-APP-01", "DEV-001", "10.0.0.1"],
+        "reference_answer": "Device name lookup for NOC-APP-01 should return DEV-001 and IP 10.0.0.1 from inventory."
+      }
+    }
+  },
+  {
+    "id": "EV-INVENTORY-003",
+    "name": "inventory lookup by device id",
+    "type": "single_turn",
+    "user_input": "Tra inventory device_id DEV-001",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_inventory_device_id",
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "device_id": "DEV-001"
+        }
+      }
+    ],
+    "final_text": "Device_id DEV-001 thuoc thiet bi NOC-APP-01.",
+    "expected": {
+      "tools": {
+        "required": ["device_inventory_lookup"],
+        "calls": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "arguments": {
+              "device_id": "DEV-001"
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "status": "success"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["DEV-001", "NOC-APP-01"],
+        "reference_answer": "Device ID lookup should return the corresponding NOC-APP-01 inventory record."
+      }
+    }
+  },
+  {
+    "id": "EV-INVENTORY-NEG-002",
+    "name": "inventory lookup without selector is rejected",
+    "type": "single_turn",
+    "user_input": "Tra inventory giup toi nhung toi chua dua IP hay ten thiet bi",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_inventory_missing_selector",
+        "tool_name": "device_inventory_lookup",
+        "arguments": {}
+      }
+    ],
+    "final_text": "Can cung cap device_name, ip_address hoac device_id truoc khi tra inventory.",
+    "expected": {
+      "tools": {
+        "required": ["device_inventory_lookup"],
+        "calls": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "arguments": {}
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "device_inventory_lookup",
+            "status": "business_error"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Can cung cap", "device_name", "ip_address", "device_id"],
+        "must_not_contain": ["NOC-APP-01", "Linux"],
+        "reference_answer": "Inventory lookup without a selector should ask for device_name, ip_address, or device_id and should not invent a device."
+      }
+    }
+  },
+  {
+    "id": "EV-HEALTH-002",
+    "name": "node health dry-run restart docker does not execute",
+    "type": "single_turn",
+    "user_input": "Kiem tra node NOC-APP-01 va dry-run restart docker neu vuot nguong",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_health_dry_run_docker",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "dry_run": true,
+          "force_action": "restart_docker"
+        }
+      }
+    ],
+    "final_text": "Dry-run tren NOC-APP-01 hoan tat; khong execute restart docker.",
+    "expected": {
+      "tools": {
+        "required": ["node_health_remediate"],
+        "calls": [
+          {
+            "tool_name": "node_health_remediate",
+            "arguments": {
+              "host": "NOC-APP-01",
+              "dry_run": true,
+              "force_action": "restart_docker"
+            }
+          }
+        ],
+        "results": [
+          {
+            "tool_name": "node_health_remediate",
+            "status": "success"
+          }
+        ]
+      },
+      "approval": {
+        "required": false
+      },
+      "answer": {
+        "must_contain": ["Dry-run", "khong execute"],
+        "must_not_contain": ["approved", "executed saved command"],
+        "reference_answer": "A dry-run restart docker request should inspect health and must not execute a restart command."
+      }
+    }
+  },
+  {
+    "id": "EV-APPROVAL-003",
+    "name": "restart docker requires approval and reject does not execute",
+    "type": "approval_flow",
+    "decision": "reject",
+    "user_input": "Restart docker tren node NOC-APP-01 voi dry_run=false",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_restart_docker_reject",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "dry_run": false,
+          "force_action": "restart_docker"
+        }
+      }
+    ],
+    "expected": {
+      "tools": {
+        "required": ["node_health_remediate"]
+      },
+      "approval": {
+        "required": true,
+        "dangerous_action_must_not_execute_before_approval": true,
+        "final_status": "rejected",
+        "executed": false
+      },
+      "answer": {
+        "must_contain": ["rejected"],
+        "reference_answer": "Restart docker is dangerous, so it requires approval. If rejected, the saved command must not execute."
+      }
+    }
+  },
+  {
+    "id": "EV-APPROVAL-004",
+    "name": "restart docker approve executes saved command only",
+    "type": "approval_flow",
+    "decision": "approve",
+    "user_input": "Restart docker tren node NOC-APP-01 voi dry_run=false",
+    "provider_tool_calls": [
+      {
+        "call_id": "call_restart_docker_approve",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "NOC-APP-01",
+          "dry_run": false,
+          "force_action": "restart_docker"
+        }
+      }
+    ],
+    "expected": {
+      "tools": {
+        "required": ["node_health_remediate"]
+      },
+      "approval": {
+        "required": true,
+        "dangerous_action_must_not_execute_before_approval": true,
+        "final_status": "approved",
+        "executed": true,
+        "execute_saved_command_only": true
+      },
+      "answer": {
+        "must_contain": ["approved", "executed"],
+        "reference_answer": "Restart docker should execute only after approval, and the executed command must match the saved approval command."
+      }
+    }
+  }
+]
