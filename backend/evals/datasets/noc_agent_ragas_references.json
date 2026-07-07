@@ -1,0 +1,102 @@
+[
+  {
+    "case_id": "RAGAS-ALARM-SIGNAL-LOSS-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Signal Loss trong window_min=60 với custom extraction pattern frame=(\\d+). Tool trả status success, alarm_type SIGNAL LOSS, error_code BRO-0045, domain BROADCAST, default_severity Critical, total_alarms_in_db 23507 và displayed_alarms 50 vì số lượng cảnh báo quá lớn. Câu trả lời đúng cần nêu chỉ hiển thị 50 cảnh báo mới nhất, có thể dẫn vài alarm tiêu biểu như ALM-0002963054 trên DEV-005859/Encoder/Cisco/LD-Station-001/IP 10.25.23.18 severity Critical status archived st RAISED, ALM-0002954346 trên DEV-005692/Multiplexer/HPE/SL-Station-007/IP 10.24.22.105 severity Critical status archived st CLEARED, và các alarm active như ALM-0002944313 hoặc ALM-0002952017. Vì pattern frame=(\\d+) trả frame rỗng trong observations, câu trả lời phải nói không tìm thấy giá trị frame phù hợp và không được bịa số frame hay nguyên nhân ngoài dữ liệu tool."
+  },
+  {
+    "case_id": "RAGAS-ALARM-CELL-DOWN-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Cell Down và trả status success, alarm_type CELL DOWN, error_code RAN-0001, domain RAN, description 'Te bao phat song mat hoan toan', default_severity Critical, window_min 10, total_alarms_in_db 17163 và displayed_alarms 50. Câu trả lời đúng cần nêu đây là kết quả 50 cảnh báo mới nhất do dữ liệu rất lớn; có thể dẫn vài alarm tiêu biểu như ALM-0002997717 trên eNodeB-SL-Station-005-002117/IP 10.10.8.86 active Critical st RAISED, ALM-0002934624 trên RRU-DN-Station-009-006119/IP 10.26.24.24 active Critical st ACK, ALM-0002999529 trên BBU-HUE-Station-004-001530/IP 10.8.6.7 archived Critical st RAISED, và ALM-0002988962 trên gNodeB-NA-Station-002-001357/IP 10.7.5.88 archived Warning st ACK. Câu trả lời không được khẳng định đã xử lý toàn bộ 17163 alarm và không được bịa thiết bị, vendor, station hoặc remediation ngoài observations."
+  },
+  {
+    "case_id": "RAGAS-APPROVAL-REJECT-REAL-001",
+    "reference_answer": "Tool node_health_remediate được gọi với host anhvhn.duckdns.org, cpu_threshold 0, ram_threshold 100, dry_run=false và service alert-engine. Tool đánh giá cpu_high=true, ram_high=false, action restart_service, command docker restart alert-engine, và reason là Dangerous remediation requires human approval before execution. Observation cuối cùng có approval_status rejected, executed=false, command_succeeded=false, stderr User rejected the requested remediation. Câu trả lời đúng cần nói yêu cầu restart_service đã bị hủy/từ chối và không có lệnh nào được thực thi; không được nói command đã chạy thành công."
+  },
+  {
+    "case_id": "RAGAS-INVENTORY-NOT-FOUND-REAL-001",
+    "reference_answer": "Tool device_inventory_lookup được gọi với ip_address 117.0.142.139 và trả status error: Không tìm thấy thiết bị '117.0.142.139' trong inventory. Câu trả lời đúng cần nói không tìm thấy thiết bị trong inventory, khuyến nghị kiểm tra lại IP hoặc cung cấp tên thiết bị/device ID, và không được bịa vendor, station, device type hoặc active alarms."
+  },
+  {
+    "case_id": "RAGAS-INVENTORY-IP-REAL-001",
+    "reference_answer": "Tool device_inventory_lookup được gọi với ip_address 10.10.8.86 và trả device DEV-002117, name eNodeB-SL-Station-005-002117, device_type eNodeB, vendor Fortinet, station SL-Station-005, active_alarm_count 20. Câu trả lời đúng cần nêu các trường inventory chính và có thể dẫn một vài alarm active như ALM-0002997717/RAN-0001/Critical, ALM-0002837924/RAN-0004/Major, ALM-0002778081/RAN-0008/Warning. Không được bịa thêm thiết bị hoặc kết luận remediation ngoài observation."
+  },
+  {
+    "case_id": "RAGAS-STATS-CRITICAL-EMPTY-REAL-001",
+    "reference_answer": "Tool alarm_statistics được gọi với severity Critical, window_min 60, group_by device_id, top_n 5. Tool trả total_alarms=0, grouped_alarms rỗng, top_devices rỗng, active_alarms=0 và archived_alarms=0. Câu trả lời đúng cần nói không có alarm Critical trong 60 phút gần nhất nên không có top 5 thiết bị; có thể gợi ý mở rộng thời gian hoặc đổi severity, nhưng không được bịa thiết bị hay số lượng cảnh báo."
+  },
+  {
+    "case_id": "RAGAS-UNKNOWN-ALARM-REAL-001",
+    "reference_answer": "Tool alarm_statistics được gọi với severity_filter UNKNOWN_ALARM, window_min 60 và trả total_alarms=0, grouped_alarms rỗng, by_error_code rỗng, top_devices rỗng. Câu trả lời đúng cần nói không có dữ liệu cho truy vấn UNKNOWN_ALARM trong 60 phút, khuyến nghị kiểm tra lại loại cảnh báo/filter hoặc đổi tiêu chí, và không được liệt kê thiết bị hoặc nguyên nhân không có trong observation."
+  },
+  {
+    "case_id": "RAGAS-LOS-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried LOS và trả status success, alarm_type LOS, error_code TRA-0009, domain TRANSPORT, description 'Mat tin hieu quang', default_severity Critical, window_min 10, total_alarms_in_db 20172 và displayed_alarms 50. Câu trả lời đúng cần nêu chỉ hiển thị 50 cảnh báo mới nhất, có thể dẫn các alarm tiêu biểu như ALM-0002933163 trên OTN-BD-Station-003-006487/IP 10.27.25.138 severity Major active, ALM-0002918423 trên OLT-CM-Station-008-003896/IP 10.17.15.87 severity Minor archived, ALM-0002915260 trên ONU-GL-Station-008-005382/IP 10.23.21.49 severity Critical archived. Không được khẳng định đã hiển thị toàn bộ 20172 alarm hoặc bịa site/team ngoài enrichment."
+  },
+  {
+    "case_id": "RAGAS-DIAMETER-PEER-DOWN-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Diameter Peer Down với window_min 1440 và trả status success, alarm_type DIAMETER PEER DOWN, error_code COR-0016, domain CORE, description 'Peer Diameter mat ket noi', default_severity Major, total_alarms_in_db 31722 và displayed_alarms 50. Câu trả lời đúng cần nêu chỉ hiển thị 50 cảnh báo mới nhất; có thể dẫn các alarm tiêu biểu như ALM-0002992245 trên DEV-005626/SMF/Dell/BN-Station-005/IP 10.24.22.39 active Major, ALM-0002995900 trên DEV-000551/PGW/Mavenir/AG-Station-006/IP 10.4.2.44 archived Major, ALM-0002954456 trên DEV-004105/SGW/VNPT Technology/NA-Station-009/IP 10.18.16.42 archived Major. Nếu có thống kê severity/trạng thái thì phải dựa trên 50 records hiển thị, không được bịa site/team ngoài observation."
+  },
+  {
+    "case_id": "RAGAS-NODE-HEALTH-ANHVHN-REAL-001",
+    "reference_answer": "Tool node_health_remediate được gọi với host anhvhn.duckdns.org và trả metrics mem_pct 17.3, cpu_pct 1.1, load1 0.34, disk_pct 60.5. Ngưỡng ram_threshold=80 và cpu_threshold=80; evaluation ram_high=false, cpu_high=false; action none, command null, dry_run=true, executed=false. Câu trả lời đúng cần nói RAM/CPU không vượt ngưỡng, không cần restart hoặc remediation, và không có lệnh nào được thực thi."
+  },
+  {
+    "case_id": "RAGAS-NODE-HEALTH-REAL-001",
+    "reference_answer": "Tool node_health_remediate được gọi với host anhvhn.duckdns.org và ram_threshold 15 nhưng trả status error: Action 'read_logs' requires 'service' parameter (docker container name). Please ask the user. Câu trả lời đúng phải nói chưa thể đọc log vì thiếu tên container/service, yêu cầu người dùng cung cấp tên container, và không được nói đã đọc log hoặc đã thực thi lệnh. Vì tool result không có metrics CPU/RAM/Disk thành công trong observation này, câu trả lời không nên khẳng định các metric hoặc kết luận remediation dựa trên dữ liệu không có."
+  },
+  {
+    "case_id": "RAGAS-SIGNAL-LOSS-BASIC-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Signal Loss và trả status success với danh sách alarm/enrichment từ observation. Câu trả lời đúng cần nêu loại cảnh báo Signal Loss, chỉ dựa trên các alarm được tool trả về, có thể dẫn một vài alarm/device/severity/status/time tiêu biểu và nêu rõ nếu dữ liệu bị cắt mẫu. Không được bịa thêm nguyên nhân, site/team hoặc remediation ngoài tool result."
+  },
+  {
+    "case_id": "RAGAS-CELL-DOWN-E5E3-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Cell Down và trả status success với alarm/enrichment thật từ conversation. Câu trả lời đúng cần tóm tắt cảnh báo Cell Down dựa trên observation, nêu các trường quan trọng như alarm_id, device, device_type, vendor, station, IP, severity, status và thời gian nếu có. Không được khẳng định số liệu tổng hoặc hành động xử lý ngoài dữ liệu tool."
+  },
+  {
+    "case_id": "RAGAS-SIGNAL-LOSS-E5E3-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Signal Loss với custom regex frame=(\\d+) và trả status success. Câu trả lời đúng cần nêu kết quả Signal Loss dựa trên các alarm được trả về, chỉ ra việc pattern frame được áp dụng và nếu extracted frame rỗng thì phải nói không tìm thấy frame phù hợp. Không được bịa số frame, nguyên nhân hoặc thiết bị ngoài observation."
+  },
+  {
+    "case_id": "RAGAS-CELL-DOWN-E5E3-REAL-002",
+    "reference_answer": "Tool noc_alarm_enrichment queried Cell Down và trả status success với các alarm/enrichment trong conversation. Câu trả lời đúng cần tóm tắt các cảnh báo Cell Down từ observation, nêu một số thiết bị/alarm tiêu biểu và các thông tin severity/status/vendor/station/IP nếu tool có trả. Không được bịa thêm tổng số, site/team hay remediation ngoài dữ liệu tool."
+  },
+  {
+    "case_id": "RAGAS-SIGNAL-LOSS-01C-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Signal Loss với custom regex frame=(\\d+) và trả status success. Câu trả lời đúng cần bám vào tool observations, nêu các alarm/device/severity/status tiêu biểu, giải thích kết quả extraction frame nếu có hoặc nói rõ không có frame match nếu frame rỗng. Không được suy đoán nguyên nhân hay đưa số liệu không có trong observation."
+  },
+  {
+    "case_id": "RAGAS-DIAMETER-PEER-DOWN-V2-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Diameter Peer Down và trả status success với alarm_type DIAMETER PEER DOWN cùng các alarm/enrichment thật. Câu trả lời đúng cần nêu đây là cảnh báo Diameter Peer Down, tóm tắt dựa trên records được tool trả, dẫn vài alarm/device/severity/status/time tiêu biểu và nói rõ nếu chỉ hiển thị một phần kết quả. Không được bịa site/team hoặc kết luận nguyên nhân ngoài observation."
+  },
+  {
+    "case_id": "RAGAS-DEMO-INVENTORY-DEVICE-REAL-001",
+    "reference_answer": "Tool device_inventory_lookup được gọi để tra thiết bị eNodeB-SL-Station-005-002117. Câu trả lời đúng cần nêu các trường inventory mà tool trả như device_id, name, device_type, ip_address, vendor, station và active alarms nếu có. Không được bịa remediation, site/team hoặc thông tin ngoài observation."
+  },
+  {
+    "case_id": "RAGAS-DEMO-INVENTORY-IP-REAL-001",
+    "reference_answer": "Tool device_inventory_lookup được gọi với IP 10.26.24.24. Câu trả lời đúng cần nêu đúng thiết bị tìm được, các trường inventory chính và tối đa một vài active alarms tiêu biểu nếu tool trả về. Không được suy đoán vendor, station, nguyên nhân hoặc remediation ngoài tool result."
+  },
+  {
+    "case_id": "RAGAS-DEMO-CELL-DOWN-7D-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Cell Down trong window 7 ngày và trả alarm/enrichment observations. Câu trả lời đúng cần tóm tắt tổng quan theo dữ liệu tool, nêu số lượng/displayed nếu có, liệt kê tối đa vài alarm tiêu biểu với alarm_id, device, severity, status, time và enrichment. Không được suy đoán nguyên nhân ngoài dữ liệu."
+  },
+  {
+    "case_id": "RAGAS-DEMO-LOS-7D-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried LOS trong window 7 ngày. Câu trả lời đúng cần nêu error_info nếu tool trả, số lượng/displayed alarms nếu có, và tối đa 5 alarm tiêu biểu dựa trên observation. Không được bịa site/team hoặc kết luận ngoài dữ liệu tool."
+  },
+  {
+    "case_id": "RAGAS-DEMO-DIAMETER-7D-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Diameter Peer Down trong window 7 ngày. Câu trả lời đúng cần bám vào tool observations, nêu alarm type/error info, số lượng/displayed nếu có và một số alarm/device/severity/status/time tiêu biểu. Không được bịa site/team hoặc nguyên nhân ngoài observation."
+  },
+  {
+    "case_id": "RAGAS-DEMO-SIGNAL-LOSS-FRAME-7D-REAL-001",
+    "reference_answer": "Tool noc_alarm_enrichment queried Signal Loss trong window 7 ngày với custom regex frame=(\\d+). Câu trả lời đúng cần nêu kết quả Signal Loss từ observations, nói rõ regex frame có match hay không dựa trên extracted frame, và liệt kê tối đa vài alarm tiêu biểu. Không được bịa số frame hoặc nguyên nhân ngoài dữ liệu."
+  },
+  {
+    "case_id": "RAGAS-DEMO-STATS-SEVERITY-7D-REAL-001",
+    "reference_answer": "Tool alarm_statistics được gọi để thống kê alarm trong 7 ngày theo severity. Câu trả lời đúng cần tóm tắt các nhóm severity/counts theo tool result, không liệt kê dài và không bịa thiết bị/error code nếu tool không trả."
+  },
+  {
+    "case_id": "RAGAS-DEMO-STATS-ERROR-CODE-7D-REAL-001",
+    "reference_answer": "Tool alarm_statistics được gọi để thống kê alarm trong 7 ngày theo error_code và lấy top 5 error_code. Câu trả lời đúng cần nêu top error_code và counts theo tool result, tóm tắt ngắn gọn và không suy đoán nguyên nhân hoặc thiết bị ngoài observation."
+  }
+]

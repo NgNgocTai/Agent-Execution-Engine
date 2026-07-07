@@ -1,0 +1,230 @@
+[
+  {
+    "case_id": "RAGAS-INVENTORY-001",
+    "name": "frozen inventory lookup by IP",
+    "type": "ragas_quality",
+    "provider": "frozen_demo_snapshot",
+    "passed": true,
+    "checks": {
+      "final_answer_exists": true,
+      "tool_observations_exist": true,
+      "ragas_quality_scores_exist": false
+    },
+    "failures": [],
+    "warnings": [
+      "Ragas dependency is not available: No module named 'datasets'",
+      "missing_ragas_quality_scores"
+    ],
+    "llm_quality": {
+      "provider": "ragas_unavailable",
+      "enabled": false,
+      "model": null,
+      "groundedness_score": null,
+      "relevance_score": null,
+      "correctness_score": null,
+      "answer_quality": "not_evaluated",
+      "warnings": [
+        "Ragas dependency is not available: No module named 'datasets'"
+      ]
+    },
+    "latency_ms": null,
+    "tool_calls": [
+      {
+        "call_id": "frozen-1",
+        "tool_name": "device_inventory_lookup",
+        "arguments": {
+          "query": "117.0.142.139"
+        },
+        "iteration": 1
+      }
+    ],
+    "tool_results": [
+      {
+        "call_id": "frozen-1",
+        "tool_name": "device_inventory_lookup",
+        "status": "success",
+        "result": {
+          "query": "117.0.142.139",
+          "matched_by": "ip_address",
+          "device": {
+            "device_id": "DEV-1170142139",
+            "name": "NOC-APP-01",
+            "device_type": "Server",
+            "ip_address": "117.0.142.139",
+            "vendor_name": "Linux",
+            "station_name": "NOC"
+          },
+          "active_alarms": [
+            {
+              "alarm_id": "ALM-INV-001",
+              "severity": "Major",
+              "error_code": "ERR-001",
+              "status": "active"
+            }
+          ]
+        },
+        "error": null,
+        "execution_time_ms": 0.0,
+        "iteration": 1
+      }
+    ],
+    "approval_events": [],
+    "provider_error": null,
+    "final_answer": "IP 117.0.142.139 thuộc thiết bị NOC-APP-01, loại Server, vendor Linux, station NOC. Hiện thiết bị có 1 alarm active mức Major với error code ERR-001."
+  },
+  {
+    "case_id": "RAGAS-ALARM-001",
+    "name": "frozen Signal Loss alarm enrichment",
+    "type": "ragas_quality",
+    "provider": "frozen_demo_snapshot",
+    "passed": true,
+    "checks": {
+      "final_answer_exists": true,
+      "tool_observations_exist": true,
+      "ragas_quality_scores_exist": false
+    },
+    "failures": [],
+    "warnings": [
+      "Ragas dependency is not available: No module named 'datasets'",
+      "missing_ragas_quality_scores"
+    ],
+    "llm_quality": {
+      "provider": "ragas_unavailable",
+      "enabled": false,
+      "model": null,
+      "groundedness_score": null,
+      "relevance_score": null,
+      "correctness_score": null,
+      "answer_quality": "not_evaluated",
+      "warnings": [
+        "Ragas dependency is not available: No module named 'datasets'"
+      ]
+    },
+    "latency_ms": null,
+    "tool_calls": [
+      {
+        "call_id": "frozen-1",
+        "tool_name": "noc_alarm_enrichment",
+        "arguments": {
+          "alarm_type": "Signal Loss",
+          "window_minutes": 60
+        },
+        "iteration": 1
+      }
+    ],
+    "tool_results": [
+      {
+        "call_id": "frozen-1",
+        "tool_name": "noc_alarm_enrichment",
+        "status": "success",
+        "result": {
+          "alarm_type": "Signal Loss",
+          "total_alarms": 8,
+          "severity_distribution": {
+            "Critical": 3,
+            "Major": 5
+          },
+          "top_devices": [
+            "NOC-APP-01",
+            "NOC-APP-02"
+          ],
+          "enriched_devices": [
+            {
+              "device_name": "NOC-APP-01",
+              "vendor_name": "Linux",
+              "station_name": "NOC",
+              "alarm_count": 5
+            },
+            {
+              "device_name": "NOC-APP-02",
+              "vendor_name": "Linux",
+              "station_name": "NOC",
+              "alarm_count": 3
+            }
+          ]
+        },
+        "error": null,
+        "execution_time_ms": 0.0,
+        "iteration": 1
+      }
+    ],
+    "approval_events": [],
+    "provider_error": null,
+    "final_answer": "Trong 60 phút qua có 8 alarm Signal Loss, gồm 3 Critical và 5 Major. Hai thiết bị nổi bật là NOC-APP-01 với 5 alarm và NOC-APP-02 với 3 alarm, đều thuộc station NOC. Mức độ này cần được xem là bất thường và nên ưu tiên kiểm tra hai thiết bị trên trước."
+  },
+  {
+    "case_id": "RAGAS-HEALTH-001",
+    "name": "frozen node health dry-run",
+    "type": "ragas_quality",
+    "provider": "frozen_demo_snapshot",
+    "passed": true,
+    "checks": {
+      "final_answer_exists": true,
+      "tool_observations_exist": true,
+      "ragas_quality_scores_exist": false
+    },
+    "failures": [],
+    "warnings": [
+      "Ragas dependency is not available: No module named 'datasets'",
+      "missing_ragas_quality_scores"
+    ],
+    "llm_quality": {
+      "provider": "ragas_unavailable",
+      "enabled": false,
+      "model": null,
+      "groundedness_score": null,
+      "relevance_score": null,
+      "correctness_score": null,
+      "answer_quality": "not_evaluated",
+      "warnings": [
+        "Ragas dependency is not available: No module named 'datasets'"
+      ]
+    },
+    "latency_ms": null,
+    "tool_calls": [
+      {
+        "call_id": "frozen-1",
+        "tool_name": "node_health_remediate",
+        "arguments": {
+          "host": "anhvhn.duckdns.org",
+          "ram_threshold": 80,
+          "dry_run": true
+        },
+        "iteration": 1
+      }
+    ],
+    "tool_results": [
+      {
+        "call_id": "frozen-1",
+        "tool_name": "node_health_remediate",
+        "status": "success",
+        "result": {
+          "host": "anhvhn.duckdns.org",
+          "metrics": {
+            "mem_pct": 91.4,
+            "cpu_pct": 36.2,
+            "disk_pct": 48.7
+          },
+          "thresholds": {
+            "ram_threshold": 80,
+            "cpu_threshold": 80
+          },
+          "evaluation": {
+            "ram_high": true,
+            "cpu_high": false
+          },
+          "action": "restart_docker",
+          "dry_run": true,
+          "executed": false,
+          "command": "sudo -n systemctl restart docker"
+        },
+        "error": null,
+        "execution_time_ms": 0.0,
+        "iteration": 1
+      }
+    ],
+    "approval_events": [],
+    "provider_error": null,
+    "final_answer": "Node anhvhn.duckdns.org đang có RAM cao: 91.4%, vượt ngưỡng 80%. CPU 36.2% và disk 48.7% chưa vượt ngưỡng. Vì yêu cầu là dry-run nên hệ thống chỉ đề xuất restart docker bằng lệnh sudo -n systemctl restart docker, chưa thực thi command nào."
+  }
+]
