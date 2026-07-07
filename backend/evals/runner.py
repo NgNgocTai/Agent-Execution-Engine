@@ -11,6 +11,10 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
 from core.schemas import AgentEventType, NormalizedResponse, NormalizedToolCall
+from evals.collector import EvalCollector
+from evals.deterministic import evaluate_case
+from evals.ragas_evaluator import evaluate_quality
+from evals.report import print_summary, write_reports
 from services.agent_service import AgentEngine
 from services.skills.alarm_statistics import AlarmStatisticsSkill
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
@@ -20,6 +24,8 @@ from services.skills.registry import SkillRegistry
 from services.tool_executor import ToolExecutor
 
 CASES_DIR = Path(__file__).resolve().parent / "cases"
+DATASETS_DIR = Path(__file__).resolve().parent / "datasets"
+RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 
 class EvalFailure(AssertionError):
@@ -156,8 +162,45 @@ class FakeNodeHealthSkill(BaseSkill):
         self,
         host: str,
         dry_run: bool = True,
+        service: str = "",
+        force_action: str | None = None,
         **kwargs: Any,
     ) -> SkillResult:
+        if force_action == "restart_service" and not service:
+            return SkillResult(
+                status=SkillStatus.BUSINESS_ERROR,
+                data=None,
+                error="Action 'restart_service' requires 'service' parameter.",
+            )
+
+        if force_action in {"restart_docker", "restart_service"} and not dry_run:
+            command = (
+                "sudo -n systemctl restart docker"
+                if force_action == "restart_docker"
+                else f"docker restart {service or 'alert-engine'}"
+            )
+            approval_metadata = {
+                "host": host,
+                "service": service,
+                "action": force_action,
+                "command": command,
+                "metrics": {"mem_pct": 91.0, "cpu_pct": 85.0, "disk_pct": 22.0},
+                "thresholds": {"ram_threshold": 80, "cpu_threshold": 80},
+                "evaluation": {"ram_high": True, "cpu_high": True},
+                "reason": "Dangerous remediation requires human approval before execution.",
+            }
+            return SkillResult(
+                status=SkillStatus.SUCCESS,
+                data={
+                    **approval_metadata,
+                    "dry_run": dry_run,
+                    "executed": False,
+                    "approval_status": "pending",
+                },
+                needs_approval=True,
+                approval_metadata=approval_metadata,
+            )
+
         return SkillResult(
             status=SkillStatus.SUCCESS,
             data={
@@ -171,6 +214,15 @@ class FakeNodeHealthSkill(BaseSkill):
                 "executed": False,
             },
         )
+
+
+class FakeApprovalRepo:
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+
+    async def create_pending(self, **kwargs: Any) -> dict[str, Any]:
+        self.created.append(kwargs)
+        return kwargs
 
 
 class ScriptedProvider:
@@ -208,6 +260,40 @@ class ScriptedProvider:
 def load_cases(filename: str) -> list[dict]:
     with (CASES_DIR / filename).open(encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_dataset(filename: str) -> list[dict]:
+    with (DATASETS_DIR / filename).open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_quality_references(
+    filename: str = "noc_agent_ragas_references.json",
+) -> dict[str, str]:
+    path = DATASETS_DIR / filename
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as f:
+        records = json.load(f)
+    return {
+        record["case_id"]: record["reference_answer"]
+        for record in records
+        if record.get("case_id") and record.get("reference_answer")
+    }
+
+
+def apply_quality_references(cases: list[dict]) -> int:
+    references = load_quality_references()
+    applied = 0
+    for case in cases:
+        reference_answer = references.get(case.get("id"))
+        if not reference_answer:
+            continue
+        case.setdefault("expected", {}).setdefault("answer", {})[
+            "reference_answer"
+        ] = reference_answer
+        applied += 1
+    return applied
 
 
 def build_registry() -> SkillRegistry:
@@ -322,12 +408,263 @@ async def run_agent_case(case: dict) -> None:
     assert_contains_all(final_text, case.get("expected_final_contains", []), "final answer")
 
 
+async def run_benchmark_case(
+    case: dict,
+    quality_evaluator: str = "none",
+) -> dict[str, Any]:
+    registry = build_registry()
+    executor = ToolExecutor(registry)
+    engine = AgentEngine(executor, registry, tracer=None)
+    provider = ScriptedProvider(
+        tool_calls=case.get("provider_tool_calls", []),
+        final_text=case.get("final_text", ""),
+    )
+
+    collector = EvalCollector()
+    approval_repo = FakeApprovalRepo()
+    async for event in engine.run(
+        session_id=f"eval-{case['id']}",
+        user_message=case["user_input"],
+        provider=provider,
+        history=[],
+        approval_repo=approval_repo,
+    ):
+        collector.record(event)
+
+    if case.get("type") == "approval_flow":
+        _simulate_approval_decision(case, collector, approval_repo)
+
+    deterministic = evaluate_case(case, collector)
+    llm_quality = await evaluate_quality(case, collector, evaluator=quality_evaluator)
+
+    return {
+        "case_id": case["id"],
+        "name": case.get("name", case["id"]),
+        "type": case.get("type", "single_turn"),
+        "passed": deterministic.passed,
+        "checks": deterministic.checks,
+        "failures": deterministic.failures,
+        "warnings": deterministic.warnings,
+        "llm_quality": llm_quality,
+        "latency_ms": collector.latency_ms,
+        "tool_calls": collector.tool_calls,
+        "tool_results": collector.tool_results,
+        "approval_events": collector.approval_events,
+        "provider_error": collector.provider_error,
+        "final_answer": collector.final_answer,
+    }
+
+
+async def run_quality_case(
+    case: dict[str, Any],
+    quality_evaluator: str = "ragas",
+) -> dict[str, Any]:
+    collector = collector_from_frozen_case(case)
+    failures: list[str] = []
+    warnings: list[str] = []
+
+    if not collector.final_answer:
+        failures.append("missing_final_answer")
+    if not collector.tool_results:
+        failures.append("missing_tool_observations")
+
+    llm_quality = await evaluate_quality(
+        case,
+        collector,
+        evaluator=quality_evaluator,
+    )
+    warnings.extend(llm_quality.get("warnings", []))
+
+    quality_scores = [
+        llm_quality.get("groundedness_score"),
+        llm_quality.get("correctness_score"),
+    ]
+    if quality_evaluator == "ragas" and not any(score is not None for score in quality_scores):
+        warnings.append("missing_ragas_quality_scores")
+
+    return {
+        "case_id": case["id"],
+        "name": case.get("name", case["id"]),
+        "type": case.get("type", "ragas_quality"),
+        "provider": case.get("provider") or case.get("source", "frozen_observation"),
+        "model": case.get("model"),
+        "comparison_group": case.get("comparison_group"),
+        "passed": not failures,
+        "checks": {
+            "final_answer_exists": bool(collector.final_answer),
+            "tool_observations_exist": bool(collector.tool_results),
+            "ragas_quality_scores_exist": any(score is not None for score in quality_scores),
+        },
+        "failures": failures,
+        "warnings": warnings,
+        "llm_quality": llm_quality,
+        "latency_ms": case.get("latency_ms"),
+        "tool_calls": collector.tool_calls,
+        "tool_results": collector.tool_results,
+        "approval_events": collector.approval_events,
+        "provider_error": None,
+        "final_answer": collector.final_answer,
+    }
+
+
+def collector_from_frozen_case(case: dict[str, Any]) -> EvalCollector:
+    collector = EvalCollector()
+    collector.final_answer = case.get("final_answer")
+    if collector.final_answer:
+        collector.text_chunks.append(collector.final_answer)
+    collector.latency_ms = case.get("latency_ms")
+
+    for index, item in enumerate(case.get("tool_results", [])):
+        tool_name = item.get("tool_name")
+        collector.tool_calls.append(
+            {
+                "call_id": item.get("call_id", f"frozen-{index + 1}"),
+                "tool_name": tool_name,
+                "arguments": item.get("arguments", {}),
+                "iteration": item.get("iteration", 1),
+            }
+        )
+        collector.tool_results.append(
+            {
+                "call_id": item.get("call_id", f"frozen-{index + 1}"),
+                "tool_name": tool_name,
+                "status": item.get("status", "success"),
+                "result": item.get("data", item.get("result")),
+                "error": item.get("error"),
+                "execution_time_ms": item.get("execution_time_ms", 0.0),
+                "iteration": item.get("iteration", 1),
+            }
+        )
+    return collector
+
+
+def _simulate_approval_decision(
+    case: dict[str, Any],
+    collector: EvalCollector,
+    approval_repo: FakeApprovalRepo,
+) -> None:
+    if not collector.approval_events:
+        return
+
+    event = collector.approval_events[-1]
+    approval = event["approval"]
+    command = approval.get("command")
+    host = approval.get("host")
+    decision = case.get("decision", "reject")
+
+    if decision == "approve":
+        tool_result = {
+            **approval,
+            "approval_status": "approved",
+            "executed": True,
+            "command_succeeded": True,
+            "exit_code": 0,
+            "stdout": "ok",
+            "stderr": "",
+            "host": host,
+            "command": command,
+        }
+        collector.record_approval_decision(
+            call_id=event["call_id"],
+            tool_name=event["tool_name"],
+            status=SkillStatus.SUCCESS,
+            result=tool_result,
+            summary=f"approved and executed saved command {command} on {host}",
+        )
+        return
+
+    tool_result = {
+        **approval,
+        "approval_status": "rejected",
+        "executed": False,
+        "command_succeeded": False,
+        "exit_code": None,
+        "stdout": None,
+        "stderr": "User rejected the requested remediation.",
+        "host": host,
+        "command": command,
+    }
+    collector.record_approval_decision(
+        call_id=event["call_id"],
+        tool_name=event["tool_name"],
+        status=SkillStatus.BUSINESS_ERROR,
+        result=tool_result,
+        summary=f"rejected remediation request; command {command} was not executed",
+    )
+
+
+async def run_benchmark(
+    dataset: str,
+    results_dir: Path,
+    quality_evaluator: str = "none",
+) -> int:
+    cases = load_dataset(dataset)
+    records = []
+    failed = 0
+
+    for case in cases:
+        record = await run_benchmark_case(case, quality_evaluator=quality_evaluator)
+        records.append(record)
+        if record["passed"]:
+            print(f"PASS e2e-workflow: {case['id']} {case.get('name', '')}")
+        else:
+            failed += 1
+            print(f"FAIL e2e-workflow: {case['id']} {case.get('name', '')}")
+            for failure in record["failures"]:
+                print(f"  {failure}")
+
+    write_reports(records, results_dir)
+    print_summary(records)
+    print(f"\nReports written to: {results_dir}")
+    return failed
+
+
+async def run_quality(
+    dataset: str,
+    results_dir: Path,
+    quality_evaluator: str = "ragas",
+    source_filter: str | None = None,
+    scope_filter: str | None = None,
+) -> int:
+    cases = load_dataset(dataset)
+    applied_references = apply_quality_references(cases)
+    if applied_references:
+        print(f"Human-labeled references applied: {applied_references}")
+    if source_filter:
+        before_count = len(cases)
+        cases = [case for case in cases if case.get("source") == source_filter]
+        print(f"Quality source filter: {source_filter} ({len(cases)}/{before_count} cases)")
+    if scope_filter:
+        before_count = len(cases)
+        cases = [case for case in cases if case.get("quality_scope") == scope_filter]
+        print(f"Quality scope filter: {scope_filter} ({len(cases)}/{before_count} cases)")
+
+    records = []
+    failed = 0
+
+    for case in cases:
+        record = await run_quality_case(case, quality_evaluator=quality_evaluator)
+        records.append(record)
+        if record["passed"]:
+            print(f"PASS ragas-quality: {case['id']} {case.get('name', '')}")
+        else:
+            failed += 1
+            print(f"FAIL ragas-quality: {case['id']} {case.get('name', '')}")
+            for failure in record["failures"]:
+                print(f"  {failure}")
+
+    write_reports(records, results_dir)
+    print_summary(records)
+    print(f"\nReports written to: {results_dir}")
+    return failed
+
+
 async def run_cases(kind: str) -> int:
     files = []
-    if kind in ("all", "skills"):
-        files.append(("skill", load_cases("skill_cases.json")))
-    if kind in ("all", "agent"):
-        files.append(("agent", load_cases("agent_cases.json")))
+    if kind in ("all", "contracts", "skills"):
+        files.append(("contract-skill", load_cases("skill_cases.json")))
+    if kind in ("all", "contracts", "agent"):
+        files.append(("contract-agent-tool", load_cases("agent_cases.json")))
 
     passed = 0
     failed = 0
@@ -335,7 +672,7 @@ async def run_cases(kind: str) -> int:
         for case in cases:
             label = f"{case_type}: {case['name']}"
             try:
-                if case_type == "skill":
+                if case_type == "contract-skill":
                     await run_skill_case(case)
                 else:
                     await run_agent_case(case)
@@ -352,15 +689,80 @@ async def run_cases(kind: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run deterministic NOC Agent eval cases.")
+    parser = argparse.ArgumentParser(description="Run NOC Agent tests and workflow evals.")
     parser.add_argument(
         "--kind",
-        choices=("all", "agent", "skills"),
+        choices=("all", "contracts", "agent", "skills", "benchmark", "quality"),
         default="all",
         help="Eval suite to run.",
     )
+    parser.add_argument(
+        "--dataset",
+        default="noc_agent_eval_cases.json",
+        help="End-to-End Workflow Eval dataset file under backend/evals/datasets.",
+    )
+    parser.add_argument(
+        "--results-dir",
+        default=str(RESULTS_DIR),
+        help="Directory for JSON/CSV benchmark reports.",
+    )
+    parser.add_argument(
+        "--quality-evaluator",
+        choices=("none", "ragas"),
+        default="none",
+        help=(
+            "Answer-quality evaluator for benchmark reports. "
+            "Default 'none' runs deterministic checks only; use 'ragas' "
+            "to call optional LLM-as-a-Judge metrics."
+        ),
+    )
+    parser.add_argument(
+        "--quality-source",
+        default=None,
+        help=(
+            "Optional source filter for --kind quality, for example "
+            "'real_conversation_snapshot' to exclude sample frozen observations."
+        ),
+    )
+    parser.add_argument(
+        "--quality-scope",
+        default=None,
+        help=(
+            "Optional quality-scope filter for --kind quality, for example "
+            "'answer_quality' to exclude no-data, approval, and safety cases "
+            "from Ragas quality averages."
+        ),
+    )
     args = parser.parse_args()
-    return asyncio.run(run_cases(args.kind))
+
+    async def _run() -> int:
+        exit_code = 0
+        if args.kind in ("all", "contracts", "agent", "skills"):
+            exit_code = await run_cases(args.kind)
+        if args.kind in ("all", "benchmark"):
+            benchmark_failed = await run_benchmark(
+                args.dataset,
+                Path(args.results_dir),
+                quality_evaluator=args.quality_evaluator,
+            )
+            if benchmark_failed:
+                exit_code = 1
+        if args.kind == "quality":
+            quality_evaluator = args.quality_evaluator
+            if quality_evaluator == "none":
+                quality_evaluator = "ragas"
+            quality_failed = await run_quality(
+                args.dataset,
+                Path(args.results_dir),
+                quality_evaluator=quality_evaluator,
+                source_filter=args.quality_source,
+                scope_filter=args.quality_scope,
+            )
+            if quality_failed:
+                exit_code = 1
+        return exit_code
+
+    return asyncio.run(_run())
 
 
 if __name__ == "__main__":

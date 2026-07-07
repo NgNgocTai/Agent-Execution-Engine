@@ -1,0 +1,16 @@
+-r requirements.txt
+
+# Optional evaluation dependencies.
+# Install these only when running:
+#   python -m evals.runner --kind benchmark --quality-evaluator ragas
+#   python -m evals.runner --kind quality --dataset noc_agent_ragas_quality_cases.json --quality-evaluator ragas
+ragas>=0.3.2,<0.4.0
+datasets>=2.20.0,<4.0.0
+instructor>=1.7.0,<2.0.0
+
+# Ragas 0.3.x imports LangChain community modules that are not compatible
+# with the latest LangChain 1.x split packages yet.
+langchain>=0.3.27,<1.0.0
+langchain-community>=0.3.27,<0.4.0
+langchain-core>=0.3.75,<1.0.0
+langchain-openai>=0.3.33,<1.0.0
