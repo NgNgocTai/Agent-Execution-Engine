@@ -17,6 +17,9 @@ img/
 # Database
 *.db
 
+# Generated dry-run eval reports
+backend/evals/results/ragas_quality_dry/
+
 # Python
 __pycache__/
 *.py[cod]

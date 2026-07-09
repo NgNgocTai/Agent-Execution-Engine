@@ -197,6 +197,10 @@ class AnthropicProvider(LLMProvider):
                             tool_call_buffers[idx]["name"] += tc_delta.function.name
                         if tc_delta.function.arguments:
                             tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
+            reasoning = get_reasoning_delta(delta)
+            if reasoning:
+                yield NormalizedResponse(thinking_content=reasoning)
+                continue
             if delta.content:
                 for kind, content in think_parser.feed(delta.content):
                     if kind == "thinking":

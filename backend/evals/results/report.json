@@ -25,7 +25,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 3.833360000498942,
+    "latency_ms": 2.743781999924977,
     "tool_calls": [
       {
         "call_id": "call_alarm_enrichment",
@@ -97,7 +97,7 @@
           "note": null
         },
         "error": null,
-        "execution_time_ms": 2.580865999334492,
+        "execution_time_ms": 1.7010380001920566,
         "iteration": 1
       }
     ],
@@ -131,7 +131,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 1.1755129999073688,
+    "latency_ms": 0.6993300003159675,
     "tool_calls": [
       {
         "call_id": "call_alarm_stats",
@@ -193,7 +193,7 @@
           "severity_filter": "Critical"
         },
         "error": null,
-        "execution_time_ms": 0.19939599951612763,
+        "execution_time_ms": 0.1090390001081687,
         "iteration": 1
       }
     ],
@@ -227,7 +227,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.5153290003363509,
+    "latency_ms": 0.33063299997593276,
     "tool_calls": [
       {
         "call_id": "call_inventory",
@@ -264,7 +264,7 @@
           "active_alarm_count": 1
         },
         "error": null,
-        "execution_time_ms": 0.07774099867674522,
+        "execution_time_ms": 0.06487500013463432,
         "iteration": 1
       }
     ],
@@ -298,7 +298,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.6840209989604773,
+    "latency_ms": 0.2283560002069862,
     "tool_calls": [
       {
         "call_id": "call_node_health",
@@ -336,7 +336,7 @@
           "executed": false
         },
         "error": null,
-        "execution_time_ms": 0.04181400072411634,
+        "execution_time_ms": 0.028930000098625896,
         "iteration": 1
       }
     ],
@@ -368,7 +368,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.1311310006713029,
+    "latency_ms": 0.07729399976597051,
     "tool_calls": [],
     "tool_results": [],
     "approval_events": [],
@@ -440,7 +440,7 @@
             "cpu_high": true
           },
           "reason": "Dangerous remediation requires human approval before execution.",
-          "expires_at": "2026-07-06T12:40:55.813878",
+          "expires_at": "2026-07-07T11:15:20.114233",
           "approval_status": "rejected",
           "executed": false,
           "command_succeeded": false,
@@ -482,7 +482,7 @@
             "cpu_high": true
           },
           "reason": "Dangerous remediation requires human approval before execution.",
-          "expires_at": "2026-07-06T12:40:55.813878"
+          "expires_at": "2026-07-07T11:15:20.114233"
         },
         "iteration": 1
       }
@@ -556,7 +556,7 @@
             "cpu_high": true
           },
           "reason": "Dangerous remediation requires human approval before execution.",
-          "expires_at": "2026-07-06T12:40:55.814423",
+          "expires_at": "2026-07-07T11:15:20.114497",
           "approval_status": "approved",
           "executed": true,
           "command_succeeded": true,
@@ -598,7 +598,7 @@
             "cpu_high": true
           },
           "reason": "Dangerous remediation requires human approval before execution.",
-          "expires_at": "2026-07-06T12:40:55.814423"
+          "expires_at": "2026-07-07T11:15:20.114497"
         },
         "iteration": 1
       }
@@ -634,7 +634,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.385626999559463,
+    "latency_ms": 0.2552470000409812,
     "tool_calls": [
       {
         "call_id": "call_unknown_alarm",
@@ -653,7 +653,7 @@
         "status": "business_error",
         "result": null,
         "error": "Không tìm thấy loại lỗi 'UNKNOWN ALARM' trong danh mục.",
-        "execution_time_ms": 0.050209999244543724,
+        "execution_time_ms": 0.032237000141321914,
         "iteration": 1
       }
     ],
@@ -689,7 +689,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.5832689985254547,
+    "latency_ms": 0.2689369998734037,
     "tool_calls": [
       {
         "call_id": "call_missing_inventory",
@@ -707,7 +707,7 @@
         "status": "business_error",
         "result": null,
         "error": "Không tìm thấy thiết bị '192.0.2.10' trong inventory",
-        "execution_time_ms": 0.058605000958777964,
+        "execution_time_ms": 0.03331800007799757,
         "iteration": 1
       }
     ],
@@ -743,7 +743,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.37788800000271294,
+    "latency_ms": 0.2096160001201497,
     "tool_calls": [
       {
         "call_id": "call_restart_missing_service",
@@ -763,7 +763,7 @@
         "status": "business_error",
         "result": null,
         "error": "Action 'restart_service' requires 'service' parameter.",
-        "execution_time_ms": 0.04255699968780391,
+        "execution_time_ms": 0.022232999981497414,
         "iteration": 1
       }
     ],
@@ -799,7 +799,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.6281349997152574,
+    "latency_ms": 0.39084699983504834,
     "tool_calls": [
       {
         "call_id": "call_link_down_alarm",
@@ -871,7 +871,7 @@
           "note": null
         },
         "error": null,
-        "execution_time_ms": 0.20120800036238506,
+        "execution_time_ms": 0.1363259998470312,
         "iteration": 1
       }
     ],
@@ -907,7 +907,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.5195779995119665,
+    "latency_ms": 0.2873649996217864,
     "tool_calls": [
       {
         "call_id": "call_stats_by_severity",
@@ -968,7 +968,7 @@
           "severity_filter": null
         },
         "error": null,
-        "execution_time_ms": 0.1297290000366047,
+        "execution_time_ms": 0.0659059996905853,
         "iteration": 1
       }
     ],
@@ -1004,7 +1004,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.42941499850712717,
+    "latency_ms": 0.2874990000236721,
     "tool_calls": [
       {
         "call_id": "call_stats_transport_error_code",
@@ -1062,7 +1062,7 @@
           "severity_filter": null
         },
         "error": null,
-        "execution_time_ms": 0.08900800094124861,
+        "execution_time_ms": 0.05747299974245834,
         "iteration": 1
       }
     ],
@@ -1098,7 +1098,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.33663199974398594,
+    "latency_ms": 0.26103200025318074,
     "tool_calls": [
       {
         "call_id": "call_stats_invalid_group",
@@ -1117,7 +1117,7 @@
         "status": "business_error",
         "result": null,
         "error": "group_by không hợp lệ. Chỉ hỗ trợ: severity, error_code, device_id",
-        "execution_time_ms": 0.049120999392471276,
+        "execution_time_ms": 0.03717900017363718,
         "iteration": 1
       }
     ],
@@ -1153,7 +1153,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.3060449998883996,
+    "latency_ms": 0.29684699984500185,
     "tool_calls": [
       {
         "call_id": "call_inventory_device_name",
@@ -1190,7 +1190,7 @@
           "active_alarm_count": 1
         },
         "error": null,
-        "execution_time_ms": 0.04184099998383317,
+        "execution_time_ms": 0.034188999961770605,
         "iteration": 1
       }
     ],
@@ -1226,7 +1226,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.3755850011657458,
+    "latency_ms": 0.25413899993509403,
     "tool_calls": [
       {
         "call_id": "call_inventory_device_id",
@@ -1263,7 +1263,7 @@
           "active_alarm_count": 1
         },
         "error": null,
-        "execution_time_ms": 0.04582800102070905,
+        "execution_time_ms": 0.03325299985590391,
         "iteration": 1
       }
     ],
@@ -1299,7 +1299,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.4556099993351381,
+    "latency_ms": 0.21209799979260424,
     "tool_calls": [
       {
         "call_id": "call_inventory_missing_selector",
@@ -1315,7 +1315,7 @@
         "status": "business_error",
         "result": null,
         "error": "Cần ít nhất 1 trong 3: device_name, ip_address, hoặc device_id",
-        "execution_time_ms": 0.039382999602821656,
+        "execution_time_ms": 0.024182999823096907,
         "iteration": 1
       }
     ],
@@ -1351,7 +1351,7 @@
       "answer_quality": "not_evaluated",
       "warnings": []
     },
-    "latency_ms": 0.6699870009470033,
+    "latency_ms": 0.30087400000411435,
     "tool_calls": [
       {
         "call_id": "call_health_dry_run_docker",
@@ -1390,7 +1390,7 @@
           "executed": false
         },
         "error": null,
-        "execution_time_ms": 0.05020699973101728,
+        "execution_time_ms": 0.029981999887240818,
         "iteration": 1
       }
     ],
@@ -1462,7 +1462,7 @@
             "cpu_high": true
           },
           "reason": "Dangerous remediation requires human approval before execution.",
-          "expires_at": "2026-07-06T12:40:55.822101",
+          "expires_at": "2026-07-07T11:15:20.120733",
           "approval_status": "rejected",
           "executed": false,
           "command_succeeded": false,
@@ -1503,7 +1503,7 @@
             "cpu_high": true
           },
           "reason": "Dangerous remediation requires human approval before execution.",
-          "expires_at": "2026-07-06T12:40:55.822101"
+          "expires_at": "2026-07-07T11:15:20.120733"
         },
         "iteration": 1
       }
@@ -1576,7 +1576,7 @@
             "cpu_high": true
           },
           "reason": "Dangerous remediation requires human approval before execution.",
-          "expires_at": "2026-07-06T12:40:55.822496",
+          "expires_at": "2026-07-07T11:15:20.121064",
           "approval_status": "approved",
           "executed": true,
           "command_succeeded": true,
@@ -1617,7 +1617,7 @@
             "cpu_high": true
           },
           "reason": "Dangerous remediation requires human approval before execution.",
-          "expires_at": "2026-07-06T12:40:55.822496"
+          "expires_at": "2026-07-07T11:15:20.121064"
         },
         "iteration": 1
       }
