@@ -8,7 +8,7 @@ implementation_v1/
 !skills/
 !skills/**/*.md
 !skills/*.md
-
+img/
 # Environments
 .env
 .env.*
@@ -16,6 +16,9 @@ implementation_v1/
 
 # Database
 *.db
+
+# Generated dry-run eval reports
+backend/evals/results/ragas_quality_dry/
 
 # Python
 __pycache__/

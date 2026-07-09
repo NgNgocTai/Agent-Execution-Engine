@@ -59,6 +59,28 @@ class EventEmitter:
             iteration=iteration,
         )
 
+    def approval_required(
+        self,
+        call_id: str,
+        tool_name: str,
+        arguments: dict,
+        approval: dict,
+        updated_messages: list[dict],
+        iteration: int,
+    ) -> AgentEvent:
+        return AgentEvent(
+            type=AgentEventType.APPROVAL_REQUIRED,
+            data={
+                "call_id": call_id,
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "approval": approval,
+                "updated_messages": updated_messages,
+            },
+            session_id=self.session_id,
+            iteration=iteration,
+        )
+
     def text_delta(self, content: str) -> AgentEvent:
         return AgentEvent(
             type=AgentEventType.TEXT_DELTA,

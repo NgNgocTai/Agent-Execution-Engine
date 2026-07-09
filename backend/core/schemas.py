@@ -10,6 +10,7 @@ class AgentEventType(str, Enum):
     THINKING = "thinking"
     TOOL_CALL_START = "tool_call_start"
     TOOL_CALL_RESULT = "tool_call_result"
+    APPROVAL_REQUIRED = "approval_required"
     TEXT_DELTA = "text_delta"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"

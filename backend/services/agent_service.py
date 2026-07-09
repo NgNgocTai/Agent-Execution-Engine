@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from typing import AsyncGenerator
+from datetime import datetime, timedelta, timezone
 
 from core.event_emitter import EventEmitter
 from core.schemas import AgentEvent, AgentEventType, NormalizedMessage, NormalizedToolCall
@@ -36,13 +37,20 @@ class AgentEngine:
         user_message: str,
         provider: LLMProvider,
         history: list[dict],
+        approval_repo=None,
+        resume: bool = False,
     ) -> AsyncGenerator[AgentEvent, None]:
         start_time = time.monotonic()
         total_tool_calls = 0
         iteration = 0
 
         emitter = EventEmitter(session_id)
-        messages = build_messages(history, user_message, get_system_prompt())
+        messages = build_messages(
+            history,
+            user_message,
+            get_system_prompt(),
+            append_user=not resume,
+        )
         tools = self.skill_registry.get_tool_schemas()
 
         global_executed_tools = set()
@@ -174,6 +182,50 @@ class AgentEngine:
                         error=result.error,
                         execution_time_ms=result.execution_time_ms,
                     )
+
+                if result.needs_approval:
+                    if approval_repo is None:
+                        yield emitter.error(
+                            message="Approval repository is not configured.",
+                            code="APPROVAL_REPOSITORY_MISSING",
+                        )
+                        return
+
+                    expires_at = (
+                        datetime.now(timezone.utc).replace(tzinfo=None)
+                        + timedelta(minutes=5)
+                    )
+                    approval_metadata = dict(result.approval_metadata or {})
+                    approval_metadata["expires_at"] = expires_at.isoformat()
+
+                    await approval_repo.create_pending(
+                        conversation_id=session_id,
+                        call_id=tc.call_id,
+                        tool_name=tc.tool_name,
+                        arguments=tc.arguments,
+                        approval_metadata=approval_metadata,
+                        expires_at=expires_at,
+                    )
+
+                    total_duration_ms = (time.monotonic() - start_time) * 1000
+                    if trace_ctx:
+                        trace_ctx.finalize(
+                            total_tool_calls=total_tool_calls,
+                            total_duration_ms=total_duration_ms,
+                            output="APPROVAL_REQUIRED",
+                        )
+                    if self.tracer:
+                        self.tracer.flush()
+
+                    yield emitter.approval_required(
+                        call_id=tc.call_id,
+                        tool_name=tc.tool_name,
+                        arguments=tc.arguments,
+                        approval=approval_metadata,
+                        updated_messages=messages[1:],
+                        iteration=iteration,
+                    )
+                    return
 
                 yield emitter.tool_call_result(
                     call_id=tc.call_id,

@@ -40,7 +40,7 @@ function toProviderOption(id: string): ProviderOption {
 export default function ChatLayout() {
   const {
     messages, conversationId, isStreaming, currentProvider,
-    send, newChat, switchProvider, toggleTab, loadConversation,
+    send, newChat, switchProvider, toggleTab, loadConversation, approveDecision,
   } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -197,7 +197,12 @@ export default function ChatLayout() {
                         </span>
                       )}
                     </div>
-                    <ReasoningTrace message={msg} messageIndex={i} onToggleTab={toggleTab} />
+                    <ReasoningTrace
+                      message={msg}
+                      messageIndex={i}
+                      onToggleTab={toggleTab}
+                      onApprovalDecision={approveDecision}
+                    />
                   </div>
                 )}
               </div>
