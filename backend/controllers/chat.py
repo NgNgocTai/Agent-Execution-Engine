@@ -86,23 +86,23 @@ def _message_value(message, key: str, default=None):
 async def _save_new_messages(
     repo: ConversationRepository,
     conversation_id: str,
-    updated_messages: list,
-    num_existing: int,
+    new_messages: list,
 ) -> None:
-    messages_to_save = updated_messages[num_existing:]
-
-    for msg in messages_to_save:
+    messages_to_save = []
+    for msg in new_messages:
         tool_calls = _message_value(msg, "tool_calls")
-        await repo.add_message(
-            conversation_id,
-            role=_message_value(msg, "role"),
-            content=_message_value(msg, "content"),
-            thinking_content=_message_value(msg, "thinking_content"),
-            tool_calls=[tc.model_dump() for tc in tool_calls] if tool_calls else None,
-            tool_call_id=_message_value(msg, "tool_call_id"),
-            name=_message_value(msg, "tool_name"),
-            is_error=_message_value(msg, "is_error", False),
-        )
+        messages_to_save.append({
+            "role": _message_value(msg, "role"),
+            "content": _message_value(msg, "content"),
+            "thinking_content": _message_value(msg, "thinking_content"),
+            "tool_calls": [
+                tc if isinstance(tc, dict) else tc.model_dump() for tc in tool_calls
+            ] if tool_calls else None,
+            "tool_call_id": _message_value(msg, "tool_call_id"),
+            "name": _message_value(msg, "tool_name"),
+            "is_error": _message_value(msg, "is_error", False),
+        })
+    await repo.add_messages(conversation_id, messages_to_save)
 
 
 def _approval_summary(approved: bool, tool_result: dict, is_error: bool) -> str:
@@ -243,6 +243,14 @@ async def approve_action(req: ApprovalDecisionRequest):
             is_error=is_error,
         )
 
+        # The response generator must not access a request-scoped DB session
+        # after it has closed, or defer saving the outcome until a client reads it.
+        conversation_id = conversation.id
+        approval_call_id = approval.call_id
+        approval_tool_name = approval.tool_name
+        summary = _approval_summary(req.approved, tool_result, is_error)
+        await repo.add_message(conversation_id, role="assistant", content=summary)
+
         async def generate():
             try:
                 result_status = (
@@ -252,9 +260,9 @@ async def approve_action(req: ApprovalDecisionRequest):
                     if not req.approved
                     else SkillStatus.SUCCESS
                 )
-                yield EventEmitter(conversation.id).tool_call_result(
-                    call_id=approval.call_id,
-                    tool_name=approval.tool_name,
+                yield EventEmitter(conversation_id).tool_call_result(
+                    call_id=approval_call_id,
+                    tool_name=approval_tool_name,
                     result=SkillResult(
                         status=result_status,
                         data=tool_result,
@@ -263,22 +271,16 @@ async def approve_action(req: ApprovalDecisionRequest):
                     iteration=0,
                 ).to_sse()
 
-                summary = _approval_summary(req.approved, tool_result, is_error)
-                await repo.add_message(
-                    conversation.id,
-                    role="assistant",
-                    content=summary,
-                )
-                yield EventEmitter(conversation.id).text_delta(summary).to_sse()
-                yield EventEmitter(conversation.id).final_answer(
+                yield EventEmitter(conversation_id).text_delta(summary).to_sse()
+                yield EventEmitter(conversation_id).final_answer(
                     total_tool_calls=0,
                     total_duration_ms=0,
                     updated_messages=[],
                 ).to_sse()
-                yield f'data: {{"type":"conversation_id","data":{{"conversation_id":"{conversation.id}"}}}}\n\n'
+                yield f'data: {{"type":"conversation_id","data":{{"conversation_id":"{conversation_id}"}}}}\n\n'
             except Exception as exc:
                 logger.exception("Approval stream failed")
-                yield EventEmitter(conversation.id).error(
+                yield EventEmitter(conversation_id).error(
                     message=f"Lỗi xử lý approval stream: {exc}",
                     code="APPROVAL_STREAM_ERROR",
                 ).to_sse()
@@ -296,7 +298,8 @@ async def approve_action(req: ApprovalDecisionRequest):
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    if engine is None:
+    agent_engine = engine
+    if agent_engine is None:
         raise HTTPException(status_code=503, detail="AgentEngine not initialized")
 
     if len(req.message) > MAX_USER_MESSAGE_CHARS:
@@ -309,8 +312,6 @@ async def chat(req: ChatRequest):
 
     async with async_session() as session:
         repo = ConversationRepository(session)
-        approval_repo = ApprovalRepository(session)
-
         if req.conversation_id:
             conversation = await repo.get(req.conversation_id)
             if not conversation:
@@ -325,42 +326,47 @@ async def chat(req: ChatRequest):
         )
 
         provider = _get_provider(req.provider)
+        conversation_id = conversation.id
 
-        async def generate():
-            try:
-                async for event in engine.run(
-                    session_id=conversation.id,
+    async def generate():
+        try:
+            # The stream owns its session for the full iteration lifetime.
+            async with async_session() as stream_session:
+                stream_repo = ConversationRepository(stream_session)
+                approval_repo = ApprovalRepository(stream_session)
+                async for event in agent_engine.run(
+                    session_id=conversation_id,
                     user_message=req.message,
                     provider=provider,
                     history=history,
                     approval_repo=approval_repo,
                 ):
-                    yield event.to_sse()
-
-                    if event.type in (
+                    persist_messages = event.type in (
                         AgentEventType.FINAL_ANSWER,
                         AgentEventType.APPROVAL_REQUIRED,
-                    ):
-                        updated = event.data.get("updated_messages", [])
+                    )
+                    if persist_messages:
+                        await _save_new_messages(
+                            stream_repo, conversation_id, event.data["new_messages"]
+                        )
+                    # Never advertise a completed turn or pending approval
+                    # before the messages needed to reload it are committed.
+                    yield event.to_sse()
+                    if persist_messages:
+                        yield f'data: {{"type":"conversation_id","data":{{"conversation_id":"{conversation_id}"}}}}\n\n'
+        except Exception as exc:
+            logger.exception("Chat stream failed")
+            yield EventEmitter(conversation_id).error(
+                message=f"Lỗi xử lý chat stream: {exc}",
+                code="CHAT_STREAM_ERROR",
+            ).to_sse()
 
-                        # `updated` chứa: [toàn bộ history] + [user_message] + [các message mới tạo ra (assistant, tool)]
-                        # Ta chỉ cần lưu các message mới tạo ra
-                        num_existing = len(history) + 1
-                        await _save_new_messages(repo, conversation.id, updated, num_existing)
-                        yield f'data: {{"type":"conversation_id","data":{{"conversation_id":"{conversation.id}"}}}}\n\n'
-            except Exception as exc:
-                logger.exception("Chat stream failed")
-                yield EventEmitter(conversation.id).error(
-                    message=f"Lỗi xử lý chat stream: {exc}",
-                    code="CHAT_STREAM_ERROR",
-                ).to_sse()
-
-        return StreamingResponse(
-            generate(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

@@ -51,6 +51,9 @@ class AgentEngine:
             get_system_prompt(),
             append_user=not resume,
         )
+        # The provider context may contain only a truncated part of DB history.
+        # Track the boundary here rather than slicing by the original history size.
+        new_messages_start = len(messages)
         tools = self.skill_registry.get_tool_schemas()
 
         global_executed_tools = set()
@@ -224,6 +227,7 @@ class AgentEngine:
                         approval=approval_metadata,
                         updated_messages=messages[1:],
                         iteration=iteration,
+                        new_messages=messages[new_messages_start:],
                     )
                     return
 
@@ -274,4 +278,5 @@ class AgentEngine:
             total_tool_calls=total_tool_calls,
             total_duration_ms=total_duration_ms,
             updated_messages=updated_messages,
+            new_messages=messages[new_messages_start:],
         )

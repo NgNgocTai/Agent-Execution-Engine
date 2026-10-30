@@ -34,25 +34,45 @@ class ConversationRepository:
         name: str | None = None,
         is_error: bool = False,
     ) -> Message:
-        msg = Message(
-            conversation_id=conversation_id,
-            role=role,
-            content=content,
-            thinking_content=thinking_content,
-            tool_calls=json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
-            tool_call_id=tool_call_id,
-            name=name,
-            is_error=is_error,
+        messages = await self.add_messages(
+            conversation_id,
+            [{
+                "role": role,
+                "content": content,
+                "thinking_content": thinking_content,
+                "tool_calls": tool_calls,
+                "tool_call_id": tool_call_id,
+                "name": name,
+                "is_error": is_error,
+            }],
         )
-        self.session.add(msg)
-        await self.session.commit()
-        return msg
+        return messages[0]
+
+    async def add_messages(
+        self,
+        conversation_id: str,
+        messages: list[dict],
+    ) -> list[Message]:
+        """Commit a new turn's messages together, preserving tool-call/result pairs."""
+        records = []
+        for message in messages:
+            values = dict(message)
+            tool_calls = values.get("tool_calls")
+            values["tool_calls"] = (
+                json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None
+            )
+            records.append(Message(conversation_id=conversation_id, **values))
+
+        if records:
+            self.session.add_all(records)
+            await self.session.commit()
+        return records
 
     async def get_messages(self, conversation_id: str) -> list[dict]:
         result = await self.session.execute(
             select(Message)
             .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at)
+            .order_by(Message.created_at, Message.id)
         )
         messages = []
         for msg in result.scalars():

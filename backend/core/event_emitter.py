@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from core.schemas import AgentEvent, AgentEventType
 
 if TYPE_CHECKING:
+    from core.schemas import NormalizedMessage
     from services.skills.base import SkillResult
 
 
@@ -65,8 +66,9 @@ class EventEmitter:
         tool_name: str,
         arguments: dict,
         approval: dict,
-        updated_messages: list[dict],
+        updated_messages: list[NormalizedMessage | dict],
         iteration: int,
+        new_messages: list[NormalizedMessage] | None = None,
     ) -> AgentEvent:
         return AgentEvent(
             type=AgentEventType.APPROVAL_REQUIRED,
@@ -76,6 +78,7 @@ class EventEmitter:
                 "arguments": arguments,
                 "approval": approval,
                 "updated_messages": updated_messages,
+                "new_messages": new_messages or [],
             },
             session_id=self.session_id,
             iteration=iteration,
@@ -92,7 +95,8 @@ class EventEmitter:
         self,
         total_tool_calls: int,
         total_duration_ms: float,
-        updated_messages: list[dict],
+        updated_messages: list[NormalizedMessage | dict],
+        new_messages: list[NormalizedMessage] | None = None,
     ) -> AgentEvent:
         return AgentEvent(
             type=AgentEventType.FINAL_ANSWER,
@@ -100,6 +104,7 @@ class EventEmitter:
                 "total_tool_calls": total_tool_calls,
                 "total_duration_ms": total_duration_ms,
                 "updated_messages": updated_messages,
+                "new_messages": new_messages or [],
             },
             session_id=self.session_id,
         )
