@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -26,7 +27,13 @@ class Settings(BaseSettings):
     ssh_user: str = ""
     ssh_password: str = ""
     ssh_key_path: str = ""
-    ssh_port: int = 22
+    ssh_port: int = Field(default=22, ge=1, le=65535)
+    ssh_known_hosts: str = ""
+    ssh_auto_add_host_keys: bool = False
+    ssh_connect_timeout_seconds: float = Field(default=5, gt=0, le=120)
+    ssh_auth_timeout_seconds: float = Field(default=5, gt=0, le=120)
+    ssh_total_timeout_seconds: float = Field(default=20, gt=0, le=300)
+    ssh_output_max_bytes: int = Field(default=65536, ge=1, le=1048576)
     clickhouse_host: str = ""
     clickhouse_port: int = 8123
     clickhouse_user: str = ""

@@ -24,6 +24,20 @@ class SettingsTest(unittest.TestCase):
             Settings(_env_file=None, ssh_port="not-a-port")
         self.assertIn("ssh_port", [error["loc"][0] for error in raised.exception.errors()])
 
+    def test_ssh_resource_limits_reject_invalid_values(self):
+        for field, value in (
+            ("ssh_port", 0), ("ssh_port", 65536),
+            ("ssh_connect_timeout_seconds", 0), ("ssh_auth_timeout_seconds", -1),
+            ("ssh_total_timeout_seconds", 0), ("ssh_output_max_bytes", 0),
+            ("ssh_output_max_bytes", 1048577),
+        ):
+            with self.subTest(field=field, value=value):
+                with self.assertRaises(ValidationError):
+                    Settings(_env_file=None, **{field: value})
+
+    def test_unknown_ssh_hosts_are_not_automatically_trusted_by_default(self):
+        self.assertIs(Settings.model_fields["ssh_auto_add_host_keys"].default, False)
+
 
 if __name__ == "__main__":
     unittest.main()
