@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     model_config = {
         "env_file": str(ROOT_DIR / ".env"),
         "env_file_encoding": "utf-8",
+        # The root dotenv is also shared with the optional evaluation scripts.
+        # Their settings must not prevent the backend from starting.
+        "extra": "ignore",
     }
 
 
