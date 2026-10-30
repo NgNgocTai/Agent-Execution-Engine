@@ -1,13 +1,12 @@
-import logging
+import asyncio
 import shlex
 from datetime import datetime, timezone
 
 import paramiko
 
 from core.config import settings
+from connectors.ssh import SSHConnector, SSHExecutionError, SSHResult
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
-
-logger = logging.getLogger(__name__)
 
 METRICS_SCRIPT = (
     "python3 -c '"
@@ -88,40 +87,22 @@ class NodeHealthRemediateSkill(BaseSkill):
             "required": ["host"],
         }
 
-    def _ssh_exec(self, host: str, command: str) -> tuple[int, str, str]:
-        """Trả về (exit_code, stdout, stderr) — tách riêng để caller tự quyết định
-        cách xử lý/hiển thị, không gộp lẫn vào nhau."""
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        try:
-            client.connect(
-                hostname=host,
-                port=settings.ssh_port,
-                username=settings.ssh_user,
-                password=settings.ssh_password,
-                timeout=10,
-                look_for_keys=False,
-                allow_agent=False,
-            )
-            _, stdout, stderr = client.exec_command(command, timeout=15)
-            exit_code = stdout.channel.recv_exit_status()
-            out = stdout.read().decode("utf-8", errors="replace").strip()
-            err = stderr.read().decode("utf-8", errors="replace").strip()
-            if err:
-                logger.warning("SSH stderr [%s]: %s", host, err)
-            return exit_code, out, err
-        finally:
-            client.close()
+    def _ssh_exec(self, host: str, command: str) -> SSHResult:
+        return SSHConnector(settings).execute(host, command)
 
     def _get_metrics(self, host: str) -> dict:
         import json
 
-        _, output, _ = self._ssh_exec(host, METRICS_SCRIPT)
+        result = self._ssh_exec(host, METRICS_SCRIPT)
+        exit_code, output, _ = result
+        if exit_code != 0 or getattr(result, "stdout_truncated", False):
+            raise SSHExecutionError("SSH metrics are incomplete or the command failed", code="ssh_metrics")
         return json.loads(output)
 
     def execute_approved_command(self, host: str, command: str) -> dict:
         try:
-            exit_code, stdout_text, stderr_text = self._ssh_exec(host, command)
+            result = self._ssh_exec(host, command)
+            exit_code, stdout_text, stderr_text = result
             return {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "host": host,
@@ -131,17 +112,36 @@ class NodeHealthRemediateSkill(BaseSkill):
                 "exit_code": exit_code,
                 "stdout": stdout_text,
                 "stderr": stderr_text,
+                "stdout_truncated": getattr(result, "stdout_truncated", False),
+                "stderr_truncated": getattr(result, "stderr_truncated", False),
+                "execution_status": "succeeded" if exit_code == 0 else "failed",
+            }
+        except SSHExecutionError as e:
+            return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "host": host,
+                "command": command,
+                "executed": None if e.dispatched else False,
+                "command_succeeded": False,
+                "exit_code": None,
+                "stdout": e.stdout,
+                "stderr": str(e),
+                "stdout_truncated": e.stdout_truncated,
+                "stderr_truncated": e.stderr_truncated,
+                "execution_status": "unknown" if e.dispatched else "not_started",
+                "error_code": e.code,
             }
         except Exception as e:
             return {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "host": host,
                 "command": command,
-                "executed": False,
+                "executed": None,
                 "command_succeeded": False,
                 "exit_code": None,
                 "stdout": None,
                 "stderr": f"Error executing approved command: {e}",
+                "execution_status": "unknown",
             }
 
     async def execute(
@@ -160,7 +160,13 @@ class NodeHealthRemediateSkill(BaseSkill):
         log_lines = min(log_lines, MAX_LOG_LINES)
 
         try:
-            metrics = self._get_metrics(host)
+            metrics = await asyncio.to_thread(self._get_metrics, host)
+        except SSHExecutionError as e:
+            return SkillResult(
+                status=SkillStatus.SYSTEM_ERROR,
+                data={"host": host, "error_code": e.code},
+                error=str(e),
+            )
         except paramiko.AuthenticationException:
             return SkillResult(
                 status=SkillStatus.SYSTEM_ERROR,
@@ -217,6 +223,9 @@ class NodeHealthRemediateSkill(BaseSkill):
         stdout_text = None
         stderr_text = None
         command_succeeded = None  # None = chưa chạy; True/False = đã chạy, dựa theo exit_code
+        stdout_truncated = False
+        stderr_truncated = False
+        execution_error = None
 
         evaluation = {
             "ram_high": ram_high,
@@ -253,17 +262,32 @@ class NodeHealthRemediateSkill(BaseSkill):
 
         if command and not dry_run:
             try:
-                exit_code, stdout_text, stderr_text = self._ssh_exec(host, command)
+                result = await asyncio.to_thread(self._ssh_exec, host, command)
+                exit_code, stdout_text, stderr_text = result
+                stdout_truncated = getattr(result, "stdout_truncated", False)
+                stderr_truncated = getattr(result, "stderr_truncated", False)
                 executed = True
                 # executed=True chỉ nghĩa là SSH chạy được lệnh (không exception Python).
                 # command_succeeded phản ánh đúng kết quả của LỆNH TRÊN NODE (exit_code).
                 command_succeeded = (exit_code == 0)
+                if not command_succeeded:
+                    execution_error = "ssh_command_failed"
+            except SSHExecutionError as e:
+                executed = None if e.dispatched else False
+                stdout_text = e.stdout
+                stderr_text = str(e)
+                stdout_truncated = e.stdout_truncated
+                stderr_truncated = e.stderr_truncated
+                execution_error = e.code
+                command_succeeded = False
             except Exception as e:
                 stderr_text = f"Error executing command: {e}"
+                execution_error = "ssh_connection"
                 command_succeeded = False
 
         return SkillResult(
-            status=SkillStatus.SUCCESS,
+            status=SkillStatus.SYSTEM_ERROR if command_succeeded is False else SkillStatus.SUCCESS,
+            error=stderr_text if command_succeeded is False else None,
             data={
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "host": host,
@@ -278,5 +302,8 @@ class NodeHealthRemediateSkill(BaseSkill):
                 "exit_code": exit_code,
                 "stdout": stdout_text,
                 "stderr": stderr_text,
+                "stdout_truncated": stdout_truncated,
+                "stderr_truncated": stderr_truncated,
+                "error_code": execution_error,
             },
         )

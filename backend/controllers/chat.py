@@ -124,6 +124,12 @@ def _approval_summary(approved: bool, tool_result: dict, is_error: bool) -> str:
             "Không có lệnh nào được thực thi."
         )
 
+    if tool_result.get("execution_status") == "not_started":
+        return (
+            f"Đã được duyệt nhưng chưa thực thi lệnh `{command}` trên `{host}`. "
+            f"Lỗi: {tool_result.get('stderr') or 'SSH chưa sẵn sàng'}"
+        )
+
     if is_error:
         stderr = tool_result.get("stderr") or "không có stderr"
         return (
@@ -136,15 +142,20 @@ def _approval_summary(approved: bool, tool_result: dict, is_error: bool) -> str:
     )
 
 
-def _unknown_approval_result(metadata: dict) -> dict:
+def _unknown_approval_result(metadata: dict, details: dict | None = None) -> dict:
+    details = details or {}
     return {
         **metadata,
         "approval_status": "unknown",
         "executed": None,
         "command_succeeded": False,
         "exit_code": None,
-        "stdout": None,
-        "stderr": "Command outcome is unknown; reconcile the node before any further action.",
+        "stdout": details.get("stdout"),
+        "stderr": details.get("stderr") or "Command outcome is unknown; reconcile the node before any further action.",
+        "stdout_truncated": details.get("stdout_truncated", False),
+        "stderr_truncated": details.get("stderr_truncated", False),
+        "execution_status": "unknown",
+        "error_code": details.get("error_code"),
     }
 
 
@@ -316,8 +327,12 @@ async def approve_action(req: ApprovalDecisionRequest):
                 except Exception:
                     command_result = {}
                     logger.exception("Approved command outcome could not be confirmed")
-                if not command_result.get("command_succeeded") and command_result.get("exit_code") is None:
-                    tool_result = _unknown_approval_result(metadata)
+                if (
+                    not command_result.get("command_succeeded")
+                    and command_result.get("exit_code") is None
+                    and command_result.get("execution_status") != "not_started"
+                ):
+                    tool_result = _unknown_approval_result(metadata, command_result)
                 else:
                     tool_result = {**metadata, **command_result, "approval_status": "approved"}
             else:
