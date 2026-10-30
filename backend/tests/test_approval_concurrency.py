@@ -226,16 +226,33 @@ class ApprovalConcurrencyTest(unittest.IsolatedAsyncioTestCase):
     async def test_uncertain_ssh_result_requires_reconciliation_and_cannot_retry(self):
         self.execute.return_value = {
             "executed": False, "command_succeeded": False, "exit_code": None, "stderr": "Connection lost",
+            "stdout": "partial output", "stdout_truncated": True, "error_code": "ssh_timeout",
         }
         events = await self._decide()
         self.assertEqual(events[0]["data"]["status"], "system_error")
         row, messages = await self._state()
         self.assertEqual(row.status, "unknown")
         self.assertIsNone(json.loads(row.result)["executed"])
+        self.assertEqual(json.loads(row.result)["stdout"], "partial output")
+        self.assertTrue(json.loads(row.result)["stdout_truncated"])
         self.assertIn("đối soát", messages[-1]["content"])
         with self.assertRaises(HTTPException) as raised:
             await self._decide()
         self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(self.execute.call_count, 1)
+
+    async def test_predispatch_failure_is_saved_as_not_started_and_replayed_without_retry(self):
+        self.execute.return_value = {
+            "executed": False, "command_succeeded": False, "exit_code": None,
+            "execution_status": "not_started", "error_code": "ssh_host_key", "stderr": "Host key not trusted",
+        }
+        await self._decide()
+        await self._decide()
+        row, messages = await self._state()
+        self.assertEqual(row.status, "approved")
+        self.assertFalse(json.loads(row.result)["executed"])
+        self.assertIn("chưa thực thi", messages[-1]["content"])
+        self.assertEqual(len(messages), 2)
         self.assertEqual(self.execute.call_count, 1)
 
     async def test_executor_exception_is_recorded_as_unknown(self):
