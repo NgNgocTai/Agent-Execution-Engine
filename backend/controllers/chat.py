@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 from datetime import datetime, timezone
@@ -110,6 +111,13 @@ def _approval_summary(approved: bool, tool_result: dict, is_error: bool) -> str:
     host = tool_result.get("host", "unknown host")
     command = tool_result.get("command") or "không có command"
 
+    if tool_result.get("approval_status") == "unknown":
+        return (
+            f"Chưa xác định kết quả lệnh `{command}` trên `{host}`. "
+            "Lệnh có thể đã được gửi; cần đối soát trên node trước khi xử lý tiếp. "
+            "Hệ thống không tự động chạy lại lệnh này."
+        )
+
     if not approved:
         return (
             f"Đã hủy yêu cầu `{action}` trên `{host}`. "
@@ -125,6 +133,83 @@ def _approval_summary(approved: bool, tool_result: dict, is_error: bool) -> str:
 
     return (
         f"Đã được duyệt và đã thực thi lệnh `{command}` trên `{host}` thành công."
+    )
+
+
+def _unknown_approval_result(metadata: dict) -> dict:
+    return {
+        **metadata,
+        "approval_status": "unknown",
+        "executed": None,
+        "command_succeeded": False,
+        "exit_code": None,
+        "stdout": None,
+        "stderr": "Command outcome is unknown; reconcile the node before any further action.",
+    }
+
+
+async def _save_approval_outcome(repo, approval_repo, approval, conversation_id, approved, tool_result):
+    is_error = not approved or not bool(tool_result.get("command_succeeded"))
+    summary = _approval_summary(approved, tool_result, is_error)
+    changed = await approval_repo.resolve(
+        approval,
+        status=tool_result["approval_status"],
+        result=tool_result,
+        error=tool_result.get("stderr") if is_error else None,
+        commit=False,
+    )
+    if not changed:
+        raise HTTPException(status_code=409, detail="Approval state changed before completion")
+    # Resolve and both messages commit together; a failed write leaves the
+    # previously committed claim in place so a retry cannot repeat the command.
+    await repo.add_messages(conversation_id, [
+        {
+            "role": "tool",
+            "content": json.dumps(tool_result, ensure_ascii=False),
+            "tool_call_id": approval.call_id,
+            "name": approval.tool_name,
+            "is_error": is_error,
+        },
+        {"role": "assistant", "content": summary},
+    ])
+    return summary, is_error
+
+
+def _approval_response(conversation_id, call_id, tool_name, approved, tool_result):
+    is_error = not approved or not bool(tool_result.get("command_succeeded"))
+    summary = _approval_summary(approved, tool_result, is_error)
+    emitter = EventEmitter(conversation_id)
+
+    async def generate():
+        result_status = (
+            SkillStatus.SYSTEM_ERROR if approved and is_error
+            else SkillStatus.BUSINESS_ERROR if not approved
+            else SkillStatus.SUCCESS
+        )
+        yield emitter.tool_call_result(
+            call_id=call_id,
+            tool_name=tool_name,
+            result=SkillResult(
+                status=result_status,
+                data=tool_result,
+                error=tool_result.get("stderr") if is_error else None,
+            ),
+            iteration=0,
+        ).to_sse()
+        yield emitter.text_delta(summary).to_sse()
+        yield emitter.final_answer(
+            total_tool_calls=0, total_duration_ms=0, updated_messages=[],
+        ).to_sse()
+        yield f'data: {{"type":"conversation_id","data":{{"conversation_id":"{conversation_id}"}}}}\n\n'
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -182,9 +267,24 @@ async def approve_action(req: ApprovalDecisionRequest):
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        approval = await approval_repo.get_pending(req.conversation_id, req.call_id)
+        approval = await approval_repo.get(req.conversation_id, req.call_id)
         if not approval:
-            raise HTTPException(status_code=404, detail="Pending approval not found")
+            raise HTTPException(status_code=404, detail="Approval not found")
+
+        if approval.status in {"approved", "rejected"}:
+            if req.approved != (approval.status == "approved"):
+                raise HTTPException(status_code=409, detail="Approval already has a different decision")
+            if not approval.result:
+                raise HTTPException(status_code=409, detail="Approval result requires reconciliation")
+            return _approval_response(
+                req.conversation_id, approval.call_id, approval.tool_name,
+                req.approved, json.loads(approval.result),
+            )
+        if approval.status != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail="Approval is already claimed or requires reconciliation; do not rerun the command",
+            )
 
         if approval.expires_at <= _utcnow():
             await approval_repo.resolve(
@@ -195,104 +295,69 @@ async def approve_action(req: ApprovalDecisionRequest):
             raise HTTPException(status_code=409, detail="Approval expired")
 
         metadata = json.loads(approval.approval_metadata)
-
         if req.approved:
             command = metadata.get("command")
             host = metadata.get("host")
             if not command or not host:
                 raise HTTPException(status_code=400, detail="Approval is missing command or host")
+            if approval.tool_name != "node_health_remediate":
+                raise HTTPException(status_code=400, detail="Unsupported remediation tool")
 
-            tool = NodeHealthRemediateSkill()
-            command_result = tool.execute_approved_command(host=host, command=command)
-            tool_result = {
-                **metadata,
-                **command_result,
-                "approval_status": "approved",
-            }
-            is_error = not bool(command_result.get("command_succeeded"))
-            await approval_repo.resolve(
-                approval,
-                status="approved",
-                result=tool_result,
-                error=command_result.get("stderr") if is_error else None,
+        if not await approval_repo.claim_pending(approval, approved=req.approved):
+            raise HTTPException(status_code=409, detail="Approval expired, changed, or was claimed concurrently")
+
+        try:
+            if req.approved:
+                try:
+                    command_result = await asyncio.to_thread(
+                        NodeHealthRemediateSkill().execute_approved_command,
+                        host=host, command=command,
+                    )
+                except Exception:
+                    command_result = {}
+                    logger.exception("Approved command outcome could not be confirmed")
+                if not command_result.get("command_succeeded") and command_result.get("exit_code") is None:
+                    tool_result = _unknown_approval_result(metadata)
+                else:
+                    tool_result = {**metadata, **command_result, "approval_status": "approved"}
+            else:
+                tool_result = {
+                    **metadata,
+                    "approval_status": "rejected",
+                    "executed": False,
+                    "command_succeeded": False,
+                    "exit_code": None,
+                    "stdout": None,
+                    "stderr": "User rejected the requested remediation.",
+                }
+            await _save_approval_outcome(
+                repo, approval_repo, approval, req.conversation_id, req.approved, tool_result,
             )
-        else:
-            tool_result = {
-                **metadata,
-                "approval_status": "rejected",
-                "executed": False,
-                "command_succeeded": False,
-                "exit_code": None,
-                "stdout": None,
-                "stderr": "User rejected the requested remediation.",
-            }
-            is_error = True
-            await approval_repo.resolve(
-                approval,
-                status="rejected",
-                result=tool_result,
-                error="User rejected the requested remediation.",
-            )
-
-        await repo.add_message(
-            conversation.id,
-            role="tool",
-            content=json.dumps(tool_result, ensure_ascii=False),
-            tool_call_id=approval.call_id,
-            name=approval.tool_name,
-            is_error=is_error,
-        )
-
-        # The response generator must not access a request-scoped DB session
-        # after it has closed, or defer saving the outcome until a client reads it.
-        conversation_id = conversation.id
-        approval_call_id = approval.call_id
-        approval_tool_name = approval.tool_name
-        summary = _approval_summary(req.approved, tool_result, is_error)
-        await repo.add_message(conversation_id, role="assistant", content=summary)
-
-        async def generate():
+        except asyncio.CancelledError:
+            # Cancelling the await cannot stop an SSH command already sent by
+            # the thread. Keep its durable claim and record the ambiguity.
             try:
-                result_status = (
-                    SkillStatus.SYSTEM_ERROR
-                    if req.approved and is_error
-                    else SkillStatus.BUSINESS_ERROR
-                    if not req.approved
-                    else SkillStatus.SUCCESS
-                )
-                yield EventEmitter(conversation_id).tool_call_result(
-                    call_id=approval_call_id,
-                    tool_name=approval_tool_name,
-                    result=SkillResult(
-                        status=result_status,
-                        data=tool_result,
-                        error=tool_result.get("stderr") if is_error else None,
-                    ),
-                    iteration=0,
-                ).to_sse()
+                await session.rollback()
+                current = await approval_repo.get(req.conversation_id, req.call_id)
+                if current is not None and current.status == "executing":
+                    await _save_approval_outcome(
+                        repo, approval_repo, current, req.conversation_id, True,
+                        _unknown_approval_result(metadata),
+                    )
+            except Exception:
+                logger.exception("Approval claim retained; cancellation outcome requires reconciliation")
+            raise
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Approval claim retained after persistence failure")
+            raise HTTPException(
+                status_code=503,
+                detail="Unable to save approval outcome; reconcile before rerunning any command",
+            ) from exc
 
-                yield EventEmitter(conversation_id).text_delta(summary).to_sse()
-                yield EventEmitter(conversation_id).final_answer(
-                    total_tool_calls=0,
-                    total_duration_ms=0,
-                    updated_messages=[],
-                ).to_sse()
-                yield f'data: {{"type":"conversation_id","data":{{"conversation_id":"{conversation_id}"}}}}\n\n'
-            except Exception as exc:
-                logger.exception("Approval stream failed")
-                yield EventEmitter(conversation_id).error(
-                    message=f"Lỗi xử lý approval stream: {exc}",
-                    code="APPROVAL_STREAM_ERROR",
-                ).to_sse()
-
-        return StreamingResponse(
-            generate(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+        return _approval_response(
+            req.conversation_id, approval.call_id, approval.tool_name, req.approved, tool_result,
         )
 
 

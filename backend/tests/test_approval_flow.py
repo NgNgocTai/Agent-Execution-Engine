@@ -61,10 +61,16 @@ class FakeConversationRepoForApproval:
     async def add_message(self, conversation_id, **kwargs):
         self.messages.append({"conversation_id": conversation_id, **kwargs})
 
+    async def add_messages(self, conversation_id, messages):
+        for message in messages:
+            await self.add_message(conversation_id, **message)
+
 
 class FakeApprovalRepoForController:
     def __init__(self, session):
         self.approval = SimpleNamespace(
+            status="pending",
+            result=None,
             call_id="call_restart",
             tool_name="node_health_remediate",
             approval_metadata=json.dumps(
@@ -93,10 +99,19 @@ class FakeApprovalRepoForController:
             return self.approval
         return None
 
+    async def get(self, conversation_id, call_id):
+        return await self.get_pending(conversation_id, call_id)
+
+    async def claim_pending(self, approval, *, approved):
+        if approval.status != "pending":
+            return False
+        approval.status = "executing" if approved else "rejecting"
+        return True
+
     async def list_pending(self, conversation_id):
         return self.pending if conversation_id == "conv-1" else []
 
-    async def resolve(self, approval, status, result=None, error=None):
+    async def resolve(self, approval, status, result=None, error=None, *, commit=True):
         self.resolved.append(
             {
                 "approval": approval,
@@ -105,7 +120,8 @@ class FakeApprovalRepoForController:
                 "error": error,
             }
         )
-        return approval
+        approval.status = status
+        return True
 
 
 class FakeNodeHealthRemediateSkillForApproval:

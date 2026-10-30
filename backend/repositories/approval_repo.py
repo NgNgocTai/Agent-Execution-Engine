@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repositories.models import PendingApproval
@@ -37,6 +37,36 @@ class ApprovalRepository:
         await self.session.commit()
         return approval
 
+    async def get(self, conversation_id: str, call_id: str) -> PendingApproval | None:
+        result = await self.session.execute(
+            select(PendingApproval)
+            .where(
+                PendingApproval.conversation_id == conversation_id,
+                PendingApproval.call_id == call_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def claim_pending(self, approval: PendingApproval, *, approved: bool) -> bool:
+        """Commit ownership before any remote side effect, including across workers."""
+        result = await self.session.execute(
+            update(PendingApproval)
+            .where(
+                PendingApproval.id == approval.id,
+                PendingApproval.status == "pending",
+                PendingApproval.expires_at > _utcnow(),
+                # Bind the claim to the exact action the caller inspected.
+                PendingApproval.approval_metadata == approval.approval_metadata,
+                PendingApproval.tool_name == approval.tool_name,
+            )
+            .values(status="executing" if approved else "rejecting")
+            .execution_options(synchronize_session="fetch")
+        )
+        claimed = result.rowcount == 1
+        await self.session.commit()
+        return claimed
+
     async def get_pending(
         self,
         conversation_id: str,
@@ -70,13 +100,40 @@ class ApprovalRepository:
         status: str,
         result: dict | None = None,
         error: str | None = None,
-    ) -> PendingApproval:
-        approval.status = status
-        approval.resolved_at = _utcnow()
-        approval.result = json.dumps(result, ensure_ascii=False) if result is not None else None
-        approval.error = error
-        await self.session.commit()
-        return approval
+        *,
+        commit: bool = True,
+    ) -> bool:
+        expected_status = {
+            "approved": "executing",
+            "rejected": "rejecting",
+            "unknown": "executing",
+            "expired": "pending",
+        }.get(status)
+        if expected_status is None:
+            raise ValueError(f"Unsupported approval resolution: {status}")
+
+        now = _utcnow()
+        conditions = [
+            PendingApproval.id == approval.id,
+            PendingApproval.status == expected_status,
+        ]
+        if status == "expired":
+            conditions.append(PendingApproval.expires_at <= now)
+        resolution = await self.session.execute(
+            update(PendingApproval)
+            .where(*conditions)
+            .values(
+                status=status,
+                resolved_at=now,
+                result=json.dumps(result, ensure_ascii=False) if result is not None else None,
+                error=error,
+            )
+            .execution_options(synchronize_session="fetch")
+        )
+        changed = resolution.rowcount == 1
+        if commit:
+            await self.session.commit()
+        return changed
 
     @staticmethod
     def to_dict(approval: PendingApproval) -> dict:
