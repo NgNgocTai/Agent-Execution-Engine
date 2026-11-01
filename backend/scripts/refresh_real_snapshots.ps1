@@ -109,6 +109,7 @@ try {
         -v "${backendDir}:/app" `
         -e PYTHONPATH=/app `
         backend python @runnerArgs
+    if ($LASTEXITCODE -ne 0) { throw "Snapshot refresh failed (exit code $LASTEXITCODE)." }
 }
 finally {
     Pop-Location

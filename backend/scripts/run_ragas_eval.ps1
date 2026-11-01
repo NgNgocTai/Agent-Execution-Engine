@@ -13,6 +13,7 @@ try {
         -e PYTHONPATH=/eval_deps:/app `
         -e GIT_PYTHON_REFRESH=quiet `
         backend python -m evals.runner --kind benchmark
+    if ($LASTEXITCODE -ne 0) { throw "Deterministic benchmark failed (exit code $LASTEXITCODE)." }
 
     Write-Host ""
     Write-Host "== Ragas Quality Evaluation: Frozen Real Snapshots ==" -ForegroundColor Cyan
@@ -28,6 +29,7 @@ try {
             --quality-evaluator ragas `
             --quality-source real_conversation_snapshot `
             --quality-scope answer_quality
+    if ($LASTEXITCODE -ne 0) { throw "Ragas quality evaluation failed (exit code $LASTEXITCODE)." }
 }
 finally {
     Pop-Location
