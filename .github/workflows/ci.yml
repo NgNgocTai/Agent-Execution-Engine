@@ -35,6 +35,7 @@ jobs:
       DATABASE_URL: "sqlite+aiosqlite:///:memory:"
       NOC_AGENT_ENV_FILE: /dev/null
       APPROVAL_TEST_POSTGRES_URL: postgresql+asyncpg://approval_test:local-test-only@127.0.0.1:5432/noc_agent_approval_test
+      SANDBOX_TEST_IMAGE: python@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -46,12 +47,16 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             backend/requirements-dev.txt
+            backend/requirements.lock.txt
       - name: Install dependencies
         run: python -m pip install -r backend/requirements-dev.txt
       - name: Lint backend
         run: python -m ruff check backend
       - name: Run unit and PostgreSQL integration tests
-        run: python -m unittest discover -s backend/tests -v
+        # The integration suite never falls back to host execution.
+        run: |
+          docker pull "$SANDBOX_TEST_IMAGE"
+          python -m unittest discover -s backend/tests -v
       - name: Run offline contract evals
         working-directory: backend
         run: python -m evals.runner --kind contracts
@@ -86,7 +91,19 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build
+      - name: Install browser for offline fixture E2E
+        run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Upload browser failure traces
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: browser-failure-traces
+          path: |
+            frontend/playwright-report
+            frontend/test-results
 
   windows-scripts:
     name: Windows script failure handling
