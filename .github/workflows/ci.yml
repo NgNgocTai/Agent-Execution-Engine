@@ -1,0 +1,107 @@
+name: CI
+
+"on":
+  pull_request:
+  push:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend lint, tests and offline evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: approval_test
+          POSTGRES_PASSWORD: local-test-only
+          POSTGRES_DB: noc_agent_approval_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U approval_test -d noc_agent_approval_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+      NOC_AGENT_ENV_FILE: /dev/null
+      APPROVAL_TEST_POSTGRES_URL: postgresql+asyncpg://approval_test:local-test-only@127.0.0.1:5432/noc_agent_approval_test
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install -r backend/requirements-dev.txt
+      - name: Lint backend
+        run: python -m ruff check backend
+      - name: Run unit and PostgreSQL integration tests
+        run: python -m unittest discover -s backend/tests -v
+      - name: Run offline contract evals
+        working-directory: backend
+        run: python -m evals.runner --kind contracts
+      - name: Run offline workflow evals
+        working-directory: backend
+        run: python -m evals.runner --kind benchmark --quality-evaluator none --results-dir ../.check-results/evals
+      - name: Upload offline eval reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: offline-eval-results
+          path: .check-results/evals
+          if-no-files-found: ignore
+          retention-days: 7
+
+  frontend:
+    name: Frontend lint, typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+
+  windows-scripts:
+    name: Windows script failure handling
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      NOC_AGENT_ENV_FILE: NUL
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      # This suite uses only stdlib and fake native commands, never Docker/LLMs.
+      - name: Require Windows PowerShell for script integration tests
+        run: Get-Command powershell.exe -ErrorAction Stop
+      - run: python -m unittest discover -s backend/tests -p test_check_scripts.py -v
