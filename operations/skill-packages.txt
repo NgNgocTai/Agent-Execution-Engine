@@ -1,0 +1,126 @@
+Agent Skill packages and validation
+==================================
+
+Authoring
+---------
+From the project root:
+python backend/scripts/create_skill.py .check-results/my-alarm-skill --name alarm-summary
+python backend/scripts/package_skill.py .check-results/my-alarm-skill .check-results/my-alarm-skill.zip
+
+create_skill refuses to overwrite an existing directory. It creates SKILL.md,
+scripts/summarize.py and runtime.json. This is a scaffold, not AI code generation.
+Edit the implementation/instructions and increment metadata.version before
+uploading a changed release. Existing manifest.json packages remain supported.
+
+An Agent Skill ZIP may have a single enclosing directory. Its normalized root:
+SKILL.md
+runtime.json               optional explicit run specifications
+scripts/summarize.py
+references/data.csv        optional UTF-8 bundled data
+
+SKILL.md example:
+---
+name: alarm-summary
+description: Summarize supplied telecom alarm observations
+metadata:
+  version: "1.0.0"
+---
+Summarize supplied observations and state uncertainty. Do not claim live data.
+
+Frontmatter supports name, description, license, compatibility, metadata and
+allowed-tools. allowed-tools is descriptive metadata and never grants connector,
+network, credential or shell capabilities. YAML duplicate keys, tags, anchors
+and aliases are rejected. Names normalize to custom_alarm_summary; existing
+name/version collisions are rejected, never overwritten. Instruction-only
+packages are supported and do not start an executable sandbox.
+
+Explicit runtime.json example:
+{
+  "scripts": [{
+    "entrypoint": "scripts/summarize.py",
+    "purpose": "Summarize supplied alarm text",
+    "input_fields": [{"name":"text","kind":"string","required":true}],
+    "sample_input": {"text":"Alarm at demo site"},
+    "output_contract": "skill_result",
+    "timeout_seconds": 10
+  }]
+}
+
+The scripts array must cover every .py file under scripts/ exactly once.
+Supported input kinds: string, integer, number and boolean, with no extra fields.
+This is deliberately a bounded schema subset, not unrestricted JSON Schema.
+Each script receives its JSON arguments on stdin and as read-only /skill/args.json.
+That filename is reserved and cannot be included in the uploaded package.
+open('args.json') and literal read-only paths to bundled data are supported.
+
+Output contracts:
+- skill_result: JSON {"status":"success","data":{...}} (legacy default).
+- json: any valid finite JSON value, wrapped as a successful SkillResult.
+- text: UTF-8 stdout, wrapped as a successful SkillResult.
+Exit failure, malformed/non-finite JSON, privileged approval requests or output
+overflow fail validation. An exit-zero result does not override an invalid
+contract. Every script must pass its own sample input in the real sandbox.
+
+Multiple scripts become separate tools with stable path-derived suffixes.
+Runs pin both package content and resolved run-spec hashes. Updating the active
+version does not change a waiting run. Revoking a version blocks future calls.
+
+Validation and review
+---------------------
+1. Inspect: parse/archive limits, secret scan and detailed AST file/line findings.
+2. Upload: quarantine the immutable archive, manifest and initial report.
+3. Validate: telecom taxonomy, optional LLM domain review/run-spec suggestions,
+   then sandbox smoke testing of every declared script.
+4. A different reviewer inspects source, schemas, sample inputs and report,
+   submits notes and approves/rejects against the current report hash.
+5. Admin activates the approved version; revoke removes its active selection.
+
+Offline validation never calls an LLM. The UI opt-in explicitly authorizes
+sending source to one selected provider and may incur charges. Chat fallback
+providers are disabled for skill review. Existing model timeout, retry, context
+and cost-admission limits also apply to this call. No provider price is hardcoded.
+
+The LLM result must match a typed schema and reference only bundled script paths.
+It never approves a skill. Author-supplied runtime.json contracts remain
+authoritative; suggestions are shown for review. For packages without explicit
+contracts, valid suggestions can become the effective draft specifications,
+which must still pass sandbox testing and be reviewed by a different person.
+A taxonomy match (score >= 0.25) or valid LLM domain score >= 0.5 is required.
+Scores indicate domain relevance; they do not establish code safety.
+
+Reports include policy version, archive/run-spec hashes, each script's schema,
+bounded smoke output, errors and human decision. Failed smoke reports are saved
+while the artifact remains quarantined. Review repeats smoke tests. Concurrent
+re-analysis/revoke invalidates an in-flight stale decision instead of reviving
+the artifact. After a failed review, inspect the latest report before retrying.
+
+API (bearer authentication and skill_reviewer/admin roles apply):
+POST /api/skills/inspect       raw ZIP body; does not persist or execute code
+POST /api/skills               raw ZIP body; creates a quarantined version
+POST /api/skills/{id}/analyze  {content_hash,use_llm:false,provider:"openai"}
+POST /api/skills/{id}/review   {content_hash,report_hash,approved,notes}
+POST /api/skills/{id}/activate admin only
+POST /api/skills/{id}/revoke   admin only
+
+Limits and deployment
+---------------------
+ZIP <= 2 MiB, expanded <= 8 MiB, <= 100 files, <= 20 declared scripts.
+Python source <= 128 KiB/file and <= 20,000 AST nodes. Only supported
+transformation imports, standard input/output streams and literal workspace
+file reads are allowed by static policy. Reflection/dunder/process/environment
+access, syntax errors and likely secrets produce findings. AST is a screening
+aid and is not a proof that arbitrary Python is safe.
+
+Docker remains the execution boundary: non-root, read-only filesystem/code and
+arguments, network none, no host credentials/socket, resource/output/deadline
+limits. Configure a dedicated broker daemon and a reviewed pre-pulled SANDBOX_IMAGE
+digest as described in runbook.txt. Missing sandbox never uses host Python.
+The whole validation pass defaults to 120 seconds (SKILL_VALIDATION_TIMEOUT_SECONDS),
+with at most two simultaneous validations per web process. Each script has a
+1-30 second runtime limit. No automatic package installation or connector access.
+
+Release migration 0009 adds nullable skill_versions.validation_report and
+preserves old archives. Production startup still requires an explicit migration
+release job. New activation requires the current report and human approval;
+an older approved artifact without that evidence needs a reviewed new version.
+Fixture mode supports offline validation; paid review is rejected in fixture mode.

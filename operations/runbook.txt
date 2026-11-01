@@ -120,13 +120,28 @@ continues. Admission limits bound active runs per actor.
 
 Custom skill operations
 -----------------------
+The full package/AST/domain/run-spec workflow is documented in
+operations/skill-packages.txt. Create an Agent Skill starter locally:
+python backend/scripts/create_skill.py .check-results/my-alarm-skill --name alarm-summary
+python backend/scripts/package_skill.py .check-results/my-alarm-skill .check-results/my-alarm-skill.zip
+
 Package the included example:
 python backend/scripts/package_skill.py skill_examples/custom_alarm_summary .check-results/custom_alarm_summary.zip
 
-Upload from Skills. A different skill reviewer must inspect source/manifest and
-submit review notes; a sandbox smoke test must pass. Admin activation selects
+Use Skills to inspect a ZIP before uploading. Both legacy manifest.json packages
+and SKILL.md Agent Skill packages are supported. Run validation offline, or
+explicitly opt into the selected LLM provider for domain/run-spec suggestions.
+The report records file/line AST findings, taxonomy, LLM status, effective schemas,
+per-script hashes and smoke results. All bundled entrypoint scripts must pass.
+A different skill reviewer must inspect source/manifest/report and submit review
+notes; approval repeats sandbox tests. Admin activation selects
 an immutable name/version/hash. New runs select the active version, waiting
 runs retain their pins, and revoke blocks subsequent execution of that version.
+The resolved run-spec is hashed separately from the uploaded archive. Review
+must include the current report_hash; concurrent re-analysis/revoke invalidates
+stale review requests. Apply release migration 0009 before starting production.
+Old archive bytes are preserved. Previously approved versions without a current
+report cannot be newly activated; upload/review a new version under this policy.
 Custom skills currently support bounded scalar input fields and read-only
 transformations of supplied data. They do not receive database/SSH credentials,
 network access, arbitrary package installation or connector capabilities.
