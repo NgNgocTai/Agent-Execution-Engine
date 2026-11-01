@@ -170,7 +170,7 @@ class LangfusePayloadTest(unittest.TestCase):
 
 
 class LangfuseAgentLifecycleTest(unittest.IsolatedAsyncioTestCase):
-    async def test_agent_records_llm_generations_tool_span_finalize_and_flush(self):
+    async def test_agent_records_telemetry_without_blocking_network_flush(self):
         tracer = FakeTracer()
         engine = AgentEngine(
             tool_executor=FakeToolExecutor(),
@@ -207,7 +207,7 @@ class LangfuseAgentLifecycleTest(unittest.IsolatedAsyncioTestCase):
             len("Need alarm stats."),
         )
         self.assertEqual(tracer.trace.update_calls[0]["metadata"]["total_tool_calls"], 1)
-        self.assertEqual(tracer.flush_calls, 1)
+        self.assertEqual(tracer.flush_calls, 0)
 
 
 if __name__ == "__main__":

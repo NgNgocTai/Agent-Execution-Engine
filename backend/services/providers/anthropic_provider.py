@@ -24,12 +24,13 @@ class AnthropicProvider(LLMProvider):
         if self._use_openai_format:
             from openai import AsyncOpenAI
             self.client = AsyncOpenAI(
+                max_retries=0,
                 api_key=settings.anthropic_api_key,
                 base_url=settings.anthropic_base_url,
             )
         else:
             from anthropic import AsyncAnthropic
-            self.client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+            self.client = AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
 
     def format_tools(self, tools: list[ToolSchema]) -> list[dict]:
         if self._use_openai_format:
@@ -184,6 +185,9 @@ class AnthropicProvider(LLMProvider):
         tool_call_buffers: dict[int, dict] = {}
         think_parser = ThinkTagParser()
         async for chunk in response:
+            if hasattr(chunk, "usage") and chunk.usage:
+                yield NormalizedResponse(token_usage={"input": chunk.usage.prompt_tokens, "output": chunk.usage.completion_tokens})
+
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta is None:
                 continue
@@ -235,9 +239,6 @@ class AnthropicProvider(LLMProvider):
                     else:
                         yield NormalizedResponse(text_content=content, stop_reason="")
                 yield NormalizedResponse(stop_reason="end_turn")
-            if hasattr(chunk, "usage") and chunk.usage:
-                yield NormalizedResponse(token_usage={"input": chunk.usage.prompt_tokens, "output": chunk.usage.completion_tokens})
-
     async def _chat_anthropic_format(
         self, messages: list[NormalizedMessage], tools: list[ToolSchema]
     ) -> AsyncGenerator[NormalizedResponse, None]:

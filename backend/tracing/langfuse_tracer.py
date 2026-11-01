@@ -18,6 +18,8 @@ from langfuse import Langfuse
 from pydantic import BaseModel
 
 from core.config import settings
+from core.redaction import redact
+from core.request_context import request_id, run_id, step_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +31,12 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, dict):
-        return {str(k): _json_safe(v) for k, v in value.items()}
+        return redact({str(k): _json_safe(v) for k, v in value.items() if k != "thinking_content" or settings.langfuse_trace_thinking_content})
     if isinstance(value, (list, tuple, set)):
         return [_json_safe(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
+        return redact(value)
+    return redact(str(value))
 
 
 class LangfuseTracer:
@@ -74,12 +76,16 @@ class LangfuseTracer:
         if not self._enabled or not self._client:
             return TraceContext(trace=None, enabled=False)
 
-        trace = self._client.trace(
-            name="agent-run",
-            session_id=session_id,
-            input={"user_message": user_message},
-            metadata={"provider": provider_name},
-        )
+        try:
+            trace = self._client.trace(
+                name="agent-run",
+                session_id=session_id,
+                input=_json_safe({"user_message": user_message}),
+                metadata={"provider": provider_name, "request_id": request_id.get(), "run_id": run_id.get(), "conversation_id": session_id},
+            )
+        except Exception:
+            logger.warning("Telemetry enqueue failed")
+            return TraceContext(trace=None, enabled=False)
         return TraceContext(trace=trace, enabled=True)
 
     def flush(self) -> None:
@@ -89,6 +95,10 @@ class LangfuseTracer:
                 self._client.flush()
             except Exception as e:
                 logger.warning("Langfuse flush error: %s", e)
+
+    def close(self):
+        if self._client:
+            self._client.shutdown()
 
 
 class TraceContext:
@@ -109,15 +119,20 @@ class TraceContext:
         if not self._enabled or not self._trace:
             return GenerationContext(generation=None, enabled=False)
 
-        generation = self._trace.generation(
-            name=f"llm-call-iter-{iteration}",
-            model=model,
-            input=_json_safe(messages),
-            metadata={
-                "tools_count": len(tools) if tools else 0,
-                "tools": _json_safe(tools or []),
-            },
-        )
+        try:
+            generation = self._trace.generation(
+                name=f"llm-call-iter-{iteration}",
+                model=model,
+                input=_json_safe(messages),
+                metadata={
+                    "tools_count": len(tools) if tools else 0,
+                    "tools": _json_safe(tools or []),
+                "step_id": step_identifier(run_id.get(), f"llm:{iteration}"),
+                },
+            )
+        except Exception:
+            logger.warning("Telemetry enqueue failed")
+            return GenerationContext(generation=None, enabled=False)
         return GenerationContext(generation=generation, enabled=True)
 
     def start_tool_span(
@@ -125,16 +140,23 @@ class TraceContext:
         tool_name: str,
         arguments: dict,
         iteration: int,
+        call_id: str | None = None,
     ) -> SpanContext:
         """Ghi nhận bắt đầu một lần gọi Tool."""
         if not self._enabled or not self._trace:
             return SpanContext(span=None, enabled=False)
 
-        span = self._trace.span(
-            name=f"tool-{tool_name}",
-            input=_json_safe(arguments),
-            metadata={"iteration": iteration},
-        )
+        try:
+            span = self._trace.span(
+                name=f"tool-{tool_name}",
+                input=_json_safe(arguments),
+                metadata={"iteration": iteration,
+                    "step_id": step_identifier(run_id.get(), "tool:" + call_id) if call_id else None,
+                    "execution_id": step_identifier(run_id.get(), "execution:" + call_id) if call_id else None},
+            )
+        except Exception:
+            logger.warning("Telemetry enqueue failed")
+            return SpanContext(span=None, enabled=False)
         return SpanContext(span=span, enabled=True)
 
     def finalize(

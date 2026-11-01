@@ -70,7 +70,7 @@ class ThinkingParserTest(unittest.TestCase):
 
 
 class ThinkingLifecycleTest(unittest.IsolatedAsyncioTestCase):
-    async def test_agent_final_message_keeps_thinking_content(self):
+    async def test_agent_publishes_progress_without_persisting_private_reasoning(self):
         engine = AgentEngine(
             tool_executor=FakeToolExecutor(),
             skill_registry=FakeSkillRegistry(),
@@ -93,7 +93,8 @@ class ThinkingLifecycleTest(unittest.IsolatedAsyncioTestCase):
         assistant_msg = final_event.data["updated_messages"][-1]
 
         self.assertEqual(assistant_msg.content, "done")
-        self.assertEqual(assistant_msg.thinking_content, "checking ")
+        self.assertIsNone(assistant_msg.thinking_content)
+        self.assertNotIn("checking ", "".join(event.to_sse() for event in events))
 
 
 if __name__ == "__main__":

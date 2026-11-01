@@ -21,6 +21,9 @@ class EventEmitter:
             iteration=iteration,
         )
 
+    def progress(self, content: str, iteration: int, **metadata) -> AgentEvent:
+        return AgentEvent(type=AgentEventType.PROGRESS, data={"message": content, **metadata}, session_id=self.session_id, iteration=iteration)
+
     def tool_call_start(
         self,
         call_id: str,
@@ -55,6 +58,7 @@ class EventEmitter:
                 "result": result.data,
                 "error": result.error,
                 "execution_time_ms": result.execution_time_ms,
+                "evidence": result.evidence,
             },
             session_id=self.session_id,
             iteration=iteration,

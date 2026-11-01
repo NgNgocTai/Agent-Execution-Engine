@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 class OpenAIProvider(LLMProvider):
     def __init__(self) -> None:
         self.client = AsyncOpenAI(
+            max_retries=0,
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
         )
@@ -107,6 +108,14 @@ class OpenAIProvider(LLMProvider):
         think_parser = ThinkTagParser()
 
         async for chunk in response:
+            if hasattr(chunk, "usage") and chunk.usage:
+                yield NormalizedResponse(
+                    token_usage={
+                        "input": chunk.usage.prompt_tokens,
+                        "output": chunk.usage.completion_tokens,
+                    }
+                )
+
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta is None:
                 continue
@@ -171,11 +180,3 @@ class OpenAIProvider(LLMProvider):
                         yield NormalizedResponse(text_content=content, stop_reason="")
                 yield NormalizedResponse(stop_reason="end_turn")
             
-            if hasattr(chunk, "usage") and chunk.usage:
-                yield NormalizedResponse(
-                    token_usage={
-                        "input": chunk.usage.prompt_tokens,
-                        "output": chunk.usage.completion_tokens,
-                    }
-                )
-

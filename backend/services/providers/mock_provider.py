@@ -1,4 +1,5 @@
 import json
+import asyncio
 from typing import AsyncGenerator
 
 from core.schemas import NormalizedMessage, NormalizedResponse, NormalizedToolCall
@@ -7,9 +8,10 @@ from services.skills.base import ToolSchema
 
 
 class MockProvider(LLMProvider):
-    def __init__(self, scenario: str = "single_tool") -> None:
+    def __init__(self, scenario: str = "single_tool", delay_seconds: float = 0) -> None:
         self.scenario = scenario
         self.call_count = 0
+        self.delay_seconds = delay_seconds
 
     async def chat_completion(
         self,
@@ -17,6 +19,8 @@ class MockProvider(LLMProvider):
         tools: list[ToolSchema],
         stream: bool = True,
     ) -> AsyncGenerator[NormalizedResponse, None]:
+        if self.delay_seconds:
+            await asyncio.sleep(self.delay_seconds)
         if self.call_count == 0:
             if self.scenario == "multi_tool":
                 yield NormalizedResponse(

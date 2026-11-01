@@ -5,10 +5,14 @@ from typing import AsyncGenerator
 from datetime import datetime, timedelta, timezone
 
 from core.event_emitter import EventEmitter
+from core.auth import require
 from core.schemas import AgentEvent, AgentEventType, NormalizedMessage, NormalizedToolCall
 from services.history import build_messages
 from services.prompts import get_system_prompt
 from services.providers.base import LLMProvider
+from services.providers.gateway import complete
+from services.run_budget import RunBudget, BudgetExceeded
+from services.context_manager import ContextBudgetExceeded
 from services.skills.registry import SkillRegistry
 from services.tool_executor import ToolExecutor
 from services.skills.base import SkillStatus
@@ -39,6 +43,8 @@ class AgentEngine:
         history: list[dict],
         approval_repo=None,
         resume: bool = False,
+        checkpoint: dict | None = None,
+        save_checkpoint=None,
     ) -> AsyncGenerator[AgentEvent, None]:
         start_time = time.monotonic()
         total_tool_calls = 0
@@ -57,6 +63,21 @@ class AgentEngine:
         tools = self.skill_registry.get_tool_schemas()
 
         global_executed_tools = set()
+        budget = RunBudget(checkpoint.get("budget") if checkpoint else None)
+        interventions = []
+        resumed_calls = None
+        if checkpoint is not None:
+            if checkpoint.get("version") != 1:
+                yield emitter.error("Unsupported checkpoint version", "CHECKPOINT_VERSION")
+                return
+            messages = [NormalizedMessage.model_validate(message) for message in checkpoint["messages"]]
+            new_messages_start = len(messages)
+            iteration = checkpoint["iteration"]
+            total_tool_calls = checkpoint["total_tool_calls"]
+            global_executed_tools = {tuple(item) for item in checkpoint["executed_tools"]}
+            resumed_calls = [NormalizedToolCall.model_validate(call) for call in checkpoint["pending_calls"]]
+            interventions = checkpoint.get("interventions", [])
+
 
         # --- Langfuse: Tạo Trace cho toàn bộ phiên làm việc ---
         provider_name = type(provider).__name__
@@ -66,101 +87,142 @@ class AgentEngine:
             else None
         )
 
-        while iteration < MAX_ITERATIONS:
-            iteration += 1
-            pending_tool_calls: list[NormalizedToolCall] = []
-            accumulated_text = ""
-            accumulated_thinking = ""
-            provider_error = None
+        while iteration < MAX_ITERATIONS or resumed_calls:
+            require("operator")
+            if resumed_calls:
+                pending_tool_calls = resumed_calls
+                resumed_calls = None
+                accumulated_text = ""
+                accumulated_thinking = ""
+            else:
+                iteration += 1
+                pending_tool_calls: list[NormalizedToolCall] = []
+                accumulated_text = ""
+                accumulated_thinking = ""
+                provider_error = None
 
-            # --- Langfuse: Bắt đầu ghi nhận LLM Call ---
-            model_name = getattr(provider, "model_name", "unknown")
-            gen_ctx = (
-                trace_ctx.start_llm_generation(iteration, model_name, messages, tools)
-                if trace_ctx
-                else None
-            )
-
-            total_token_usage = None
-
-            async for response in provider.chat_completion(messages, tools):
-                if response.token_usage:
-                    total_token_usage = response.token_usage
-
-                if response.provider_error:
-                    provider_error = response.provider_error
-
-                if response.tool_calls:
-                    for tc in response.tool_calls:
-                        # Deduplicate identical tool calls in the same iteration
-                        is_duplicate = any(
-                            existing_tc.tool_name == tc.tool_name and existing_tc.arguments == tc.arguments
-                            for existing_tc in pending_tool_calls
-                        )
-                        if not is_duplicate:
-                            pending_tool_calls.append(tc)
-                            yield emitter.tool_call_start(
-                                call_id=tc.call_id,
-                                tool_name=tc.tool_name,
-                                arguments=tc.arguments,
-                                iteration=iteration,
-                            )
-
-                if response.text_content:
-                    accumulated_text += response.text_content
-                    # Streaming ngay lập tức để UI mượt mà, không chờ gom hết
-                    yield emitter.text_delta(response.text_content)
-
-                if response.thinking_content:
-                    accumulated_thinking += response.thinking_content
-                    yield emitter.thinking(content=response.thinking_content, iteration=iteration)
-
-            # --- Langfuse: Kết thúc LLM Call, ghi output ---
-            if gen_ctx:
-                gen_ctx.end(
-                    output=accumulated_text or None,
-                    tool_calls=[
-                        {"name": tc.tool_name, "arguments": tc.arguments}
-                        for tc in pending_tool_calls
-                    ] if pending_tool_calls else None,
-                    usage=total_token_usage,
-                    thinking_content=accumulated_thinking or None,
-                    provider_error=provider_error,
+                # --- Langfuse: Bắt đầu ghi nhận LLM Call ---
+                model_name = getattr(provider, "model_name", "unknown")
+                gen_ctx = (
+                    trace_ctx.start_llm_generation(iteration, model_name, messages, tools)
+                    if trace_ctx
+                    else None
                 )
 
-            # Nếu có tool calls mà LLM lười không giải thích -> Tự động tạo reasoning
-            if pending_tool_calls:
-                if not accumulated_text and not accumulated_thinking:
-                    tool_names = ", ".join(tc.tool_name for tc in pending_tool_calls)
-                    fallback_thinking = f"Tiến hành gọi công cụ: {tool_names}..."
-                    accumulated_thinking += fallback_thinking
-                    yield emitter.thinking(content=fallback_thinking, iteration=iteration)
+                total_token_usage = None
+                try:
+                    budget.reserve(provider, messages, tools)
+                except (BudgetExceeded, ContextBudgetExceeded) as exc:
+                    error = emitter.error("Run budget or context limit reached", getattr(exc, "code", "CONTEXT_BUDGET_EXCEEDED"))
+                    error.data["new_messages"] = messages[new_messages_start:]
+                    yield error
+                    return
+                yield emitter.progress("Preparing model call", iteration, step_key=f"llm:{iteration}", status="running", kind="llm")
 
-            if not pending_tool_calls:
-                if accumulated_text or accumulated_thinking:
-                    messages.append(
-                        NormalizedMessage(
-                            role="assistant",
-                            content=accumulated_text or None,
-                            thinking_content=accumulated_thinking or None,
-                        )
+                async for response in complete(provider, messages, tools):
+                    if response.token_usage:
+                        total_token_usage = response.token_usage
+
+                    if response.provider_error:
+                        provider_error = response.provider_error
+                        break
+
+                    if response.tool_calls:
+                        for tc in response.tool_calls:
+                            # Deduplicate identical tool calls in the same iteration
+                            is_duplicate = any(
+                                existing_tc.tool_name == tc.tool_name and existing_tc.arguments == tc.arguments
+                                for existing_tc in pending_tool_calls
+                            )
+                            if not is_duplicate:
+                                pending_tool_calls.append(tc)
+                                yield emitter.tool_call_start(
+                                    call_id=tc.call_id,
+                                    tool_name=tc.tool_name,
+                                    arguments=tc.arguments,
+                                    iteration=iteration,
+                                )
+
+                    if response.text_content:
+                        accumulated_text += response.text_content
+
+                    if response.thinking_content:
+                        if not accumulated_thinking:
+                            yield emitter.thinking(content="Analyzing the request", iteration=iteration)
+                        accumulated_thinking += response.thinking_content
+
+                budget.record(total_token_usage, accumulated_text, accumulated_thinking, pending_tool_calls)
+                yield emitter.progress("Model step completed", iteration, step_key=f"llm:{iteration}",
+                    status="failed" if provider_error or (not accumulated_text and not pending_tool_calls) else "succeeded", kind="llm", usage=total_token_usage, budget=budget.snapshot())
+
+                # --- Langfuse: Kết thúc LLM Call, ghi output ---
+                if gen_ctx:
+                    gen_ctx.end(
+                        output=accumulated_text or None,
+                        tool_calls=[
+                            {"name": tc.tool_name, "arguments": tc.arguments}
+                            for tc in pending_tool_calls
+                        ] if pending_tool_calls else None,
+                        usage=total_token_usage,
+                        thinking_content=accumulated_thinking or None,
+                        provider_error=provider_error,
                     )
-                break
 
-            assistant_msg = NormalizedMessage(
-                role="assistant",
-                content=accumulated_text or None,
-                thinking_content=accumulated_thinking or None,
-                tool_calls=pending_tool_calls
-            )
-            messages.append(assistant_msg)
+                if provider_error:
+                    error = emitter.error(
+                        message="Provider request failed. Please try again.",
+                        code=provider_error["code"],
+                    )
+                    error.data["partial"] = bool(accumulated_text)
+                    # Keep earlier completed tool batches; never save provider error
+                    # text or an incomplete assistant/tool batch as a success.
+                    error.data["new_messages"] = messages[new_messages_start:]
+                    yield error
+                    return
 
-            for tc in pending_tool_calls:
+                if accumulated_text:
+                    # Redact a complete bounded output instead of independent
+                    # token chunks, where a credential could span two events.
+                    yield emitter.text_delta(accumulated_text)
+
+                # Nếu có tool calls mà LLM lười không giải thích -> Tự động tạo reasoning
+                if pending_tool_calls:
+                    if not accumulated_text and not accumulated_thinking:
+                        tool_names = ", ".join(tc.tool_name for tc in pending_tool_calls)
+                        fallback_thinking = f"Tiến hành gọi công cụ: {tool_names}..."
+                        accumulated_thinking += fallback_thinking
+                        yield emitter.thinking(content=fallback_thinking, iteration=iteration)
+
+                if not pending_tool_calls:
+                    if not accumulated_text:
+                        error = emitter.error("Provider did not return an answer", "PROVIDER_NO_ANSWER")
+                        error.data["new_messages"] = messages[new_messages_start:]
+                        yield error
+                        return
+                    if accumulated_text or accumulated_thinking:
+                        messages.append(
+                            NormalizedMessage(
+                                role="assistant",
+                                content=accumulated_text or None,
+                                thinking_content=None,
+                            )
+                        )
+                    break
+
+                assistant_msg = NormalizedMessage(
+                    role="assistant",
+                    content=accumulated_text or None,
+                    thinking_content=None,
+                    tool_calls=pending_tool_calls
+                )
+                messages.append(assistant_msg)
+
+            for call_index, tc in enumerate(pending_tool_calls):
                 tc_key = (tc.tool_name, json.dumps(tc.arguments, sort_keys=True))
 
                 # --- Langfuse: Bắt đầu ghi nhận Tool Call ---
                 tool_span = (
-                    trace_ctx.start_tool_span(tc.tool_name, tc.arguments, iteration)
+                    trace_ctx.start_tool_span(tc.tool_name, tc.arguments, iteration, call_id=tc.call_id)
                     if trace_ctx
                     else None
                 )
@@ -173,7 +235,10 @@ class AgentEngine:
                     )
                 else:
                     global_executed_tools.add(tc_key)
-                    result = await self.tool_executor.execute(tc.tool_name, tc.arguments)
+                    if hasattr(self.tool_executor, "execute_call"):
+                        result = await self.tool_executor.execute_call(tc)
+                    else:
+                        result = await self.tool_executor.execute(tc.tool_name, tc.arguments)
                 
                 total_tool_calls += 1
 
@@ -210,6 +275,17 @@ class AgentEngine:
                         expires_at=expires_at,
                     )
 
+                    if save_checkpoint:
+                        await save_checkpoint({
+                            "version": 1,
+                            "messages": [message.model_dump(mode="json") for message in messages],
+                            "pending_calls": [call.model_dump(mode="json") for call in pending_tool_calls[call_index:]],
+                            "iteration": iteration,
+                            "total_tool_calls": total_tool_calls,
+                            "executed_tools": [list(key) for key in global_executed_tools],
+                            "interventions": interventions,
+                            "budget": budget.snapshot(),
+                        })
                     total_duration_ms = (time.monotonic() - start_time) * 1000
                     if trace_ctx:
                         trace_ctx.finalize(
@@ -217,8 +293,6 @@ class AgentEngine:
                             total_duration_ms=total_duration_ms,
                             output="APPROVAL_REQUIRED",
                         )
-                    if self.tracer:
-                        self.tracer.flush()
 
                     yield emitter.approval_required(
                         call_id=tc.call_id,
@@ -243,21 +317,26 @@ class AgentEngine:
                     role="tool",
                     tool_call_id=tc.call_id,
                     tool_name=tc.tool_name,
-                    content=json.dumps(result.data or result.error, ensure_ascii=False),
+                    content=json.dumps({"data": result.data, "evidence": result.evidence} if result.evidence else result.data or result.error, ensure_ascii=False),
                     is_error=is_err
                 )
                 messages.append(tool_msg)
+            if interventions:
+                for intervention in interventions:
+                    messages.append(NormalizedMessage(role="user", content="Operator intervention after the completed tool batch: " + intervention))
+                interventions = []
+                yield emitter.thinking("Operator intervention applied", iteration)
         else:
             # --- Langfuse: Ghi nhận lỗi vượt giới hạn ---
             if trace_ctx:
                 trace_ctx.finalize(total_tool_calls, (time.monotonic() - start_time) * 1000, output="MAX_ITERATIONS_REACHED")
-            if self.tracer:
-                self.tracer.flush()
 
-            yield emitter.error(
+            error = emitter.error(
                 message=f"Đã đạt giới hạn {MAX_ITERATIONS} bước xử lý.",
                 code="MAX_ITERATIONS",
             )
+            error.data["new_messages"] = messages[new_messages_start:]
+            yield error
             return
 
         total_duration_ms = (time.monotonic() - start_time) * 1000
@@ -271,12 +350,12 @@ class AgentEngine:
                 total_duration_ms=total_duration_ms,
                 output=accumulated_text or None,
             )
-        if self.tracer:
-            self.tracer.flush()
 
-        yield emitter.final_answer(
+        final = emitter.final_answer(
             total_tool_calls=total_tool_calls,
             total_duration_ms=total_duration_ms,
             updated_messages=updated_messages,
             new_messages=messages[new_messages_start:],
         )
+        final.data["budget"] = budget.snapshot()
+        yield final
