@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -5,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from controllers.chat import router as chat_router, set_engine
 from core.config import settings
+from core.redaction import RedactingFilter
+from core.auth import AuthenticationMiddleware
+from core.request_context import RequestContextMiddleware
 from repositories.clickhouse_repo import AlarmRepository
 from repositories.engine import init_db
 from repositories.postgres_repo import DeviceRepository
@@ -18,9 +22,14 @@ from services.tool_executor import ToolExecutor
 from tracing.langfuse_tracer import LangfuseTracer
 
 logging.basicConfig(level=logging.INFO)
+for handler in logging.getLogger().handlers:
+    handler.addFilter(RedactingFilter())
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s request_id=%(request_id)s run_id=%(run_id)s %(message)s"))
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NOC Agent API", version="1.0.0")
+app.add_middleware(AuthenticationMiddleware)
+app.add_middleware(RequestContextMiddleware)
 cors_origins = [
     origin.strip()
     for origin in settings.cors_origins.split(",")
@@ -30,7 +39,7 @@ cors_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -39,39 +48,64 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await init_db()
-    logger.info("SQLite initialized")
+    logger.info("Control database schema is ready")
 
-    alarm_repo = AlarmRepository()
-    logger.info("ClickHouse connected")
-
-    device_repo = DeviceRepository()
-    await device_repo.connect()
-    logger.info("PostgreSQL connected")
-
-    registry = SkillRegistry()
-    registry.register(NocAlarmEnrichmentSkill(alarm_repo, device_repo))
-    registry.register(NodeHealthRemediateSkill())
-    registry.register(AlarmStatisticsSkill(alarm_repo, device_repo))
-    registry.register(DeviceInventoryLookupSkill(alarm_repo, device_repo))
-
-    tool_executor = ToolExecutor(registry)
-
-    tracer = LangfuseTracer()
-
-    engine = AgentEngine(
-        tool_executor=tool_executor,
-        skill_registry=registry,
-        tracer=tracer,
-    )
+    from services.runtime import create_runtime
+    from services.run_worker import RunWorker
+    from repositories.engine import async_session
+    from controllers.chat import _get_provider
+    engine, resources = await create_runtime()
+    app.state.resources = resources
     set_engine(engine)
+    app.state.worker = None
+    app.state.worker_task = None
+    if settings.worker_mode == "embedded":
+        worker = RunWorker(engine, async_session, _get_provider)
+        app.state.worker = worker
+        app.state.worker_task = asyncio.create_task(worker.run_forever())
+    app.state.ready = True
 
-    logger.info("Skills registered: %s", registry.list_names())
-    logger.info("NOC Agent API ready")
+
+@app.on_event("shutdown")
+async def shutdown():
+    from services.runtime import close_runtime
+    app.state.ready = False
+    if app.state.worker:
+        app.state.worker.stop.set()
+        try:
+            await asyncio.wait_for(app.state.worker_task, timeout=30)
+        except TimeoutError:
+            pass
+    await close_runtime(app.state.resources)
 
 
 app.include_router(chat_router)
+from controllers.runs import router as runs_router
+app.include_router(runs_router)
+from controllers.skills import router as skills_router
+app.include_router(skills_router)
+from controllers.operations import router as operations_router
+app.include_router(operations_router)
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready():
+    from fastapi import HTTPException
+    if not getattr(app.state, "ready", False):
+        raise HTTPException(503, "Application is starting or draining")
+    if app.state.worker_task is not None and app.state.worker_task.done():
+        raise HTTPException(503, "Embedded worker stopped")
+    try:
+        from repositories.engine import engine as control_engine
+        from sqlalchemy import text
+        async with asyncio.timeout(2):
+            async with control_engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(503, "Control database is unavailable") from None
+    return {"status": "ready"}

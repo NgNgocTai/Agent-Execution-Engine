@@ -7,8 +7,15 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from core.event_emitter import EventEmitter
+from core.policy import approved_snapshot
+from core.auth import require
+from core.redaction import redact
+from core.config import settings
+from repositories.audit_repo import audit
+from repositories.run_models import Run, RunCheckpoint
 from core.schemas import AgentEventType
 from repositories.approval_repo import ApprovalRepository
 from repositories.conversation_repo import ConversationRepository
@@ -19,6 +26,7 @@ from services.providers.base import LLMProvider
 from services.providers.mock_provider import MockProvider
 from services.providers.openai_provider import OpenAIProvider
 from services.providers.deepseek_provider import DeepSeekProvider
+from services.providers.lifecycle import close_provider
 from services.skills.base import SkillResult, SkillStatus
 from services.skills.node_health_remediate import NodeHealthRemediateSkill
 
@@ -44,6 +52,7 @@ class RenameRequest(BaseModel):
 
 @router.put("/conversations/{conversation_id}/title")
 async def rename_conversation(conversation_id: str, req: RenameRequest):
+    require("operator")
     async with async_session() as session:
         repo = ConversationRepository(session)
         success = await repo.rename(conversation_id, req.title)
@@ -67,8 +76,13 @@ def _get_provider(name: str) -> LLMProvider:
         "anthropic": AnthropicProvider,
         "deepseek": DeepSeekProvider,
     }
-    cls = providers.get(name, MockProvider)
-    return cls()
+    cls = providers.get(name)
+    if cls is None:
+        raise HTTPException(422, "Unknown provider")
+    provider = cls(delay_seconds=settings.fixture_delay_seconds) if name == "mock" and settings.data_mode == "fixture" else cls()
+    provider.fallbacks = [providers[candidate.strip()]() for candidate in settings.llm_fallback_providers.split(",")
+                          if candidate.strip() in providers and candidate.strip() not in {name, "mock"}]
+    return provider
 
 
 AVAILABLE_PROVIDERS = ["openai", "anthropic", "deepseek"]
@@ -226,11 +240,14 @@ def _approval_response(conversation_id, call_id, tool_name, approved, tool_resul
 
 @router.get("/config")
 async def config():
-    return {"providers": AVAILABLE_PROVIDERS}
+    actor = require("viewer", "operator", "approver", "skill_reviewer")
+    return {"providers": ["mock"] if settings.data_mode == "fixture" else AVAILABLE_PROVIDERS,
+            "actor": {"subject": actor.subject, "roles": sorted(actor.roles)}}
 
 
 @router.get("/conversations/{conversation_id}/messages")
 async def get_conversation_messages(conversation_id: str):
+    require("viewer", "operator", "approver", "skill_reviewer")
     async with async_session() as session:
         repo = ConversationRepository(session)
         conversation = await repo.get(conversation_id)
@@ -242,21 +259,23 @@ async def get_conversation_messages(conversation_id: str):
         return {
             "conversation_id": conversation_id,
             "provider": conversation.provider,
-            "messages": messages,
-            "pending_approvals": pending_approvals,
+            "messages": redact(messages),
+            "pending_approvals": redact(pending_approvals),
         }
 
 
 @router.get("/conversations")
 async def list_conversations():
+    require("viewer", "operator", "approver", "skill_reviewer")
     async with async_session() as session:
         repo = ConversationRepository(session)
         conversations = await repo.list_all()
-        return {"conversations": conversations}
+        return {"conversations": redact(conversations)}
 
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str):
+    require("operator")
     async with async_session() as session:
         repo = ConversationRepository(session)
         success = await repo.delete(conversation_id)
@@ -267,6 +286,7 @@ async def delete_conversation(conversation_id: str):
 
 @router.post("/chat/approve")
 async def approve_action(req: ApprovalDecisionRequest):
+    require("approver")
     if engine is None:
         raise HTTPException(status_code=503, detail="AgentEngine not initialized")
 
@@ -307,23 +327,37 @@ async def approve_action(req: ApprovalDecisionRequest):
 
         metadata = json.loads(approval.approval_metadata)
         if req.approved:
+            active_run = await session.scalar(select(Run).where(Run.conversation_id == req.conversation_id, Run.active_key.is_not(None)))
+            if active_run:
+                checkpoint = await session.get(RunCheckpoint, active_run.id)
+                state = json.loads(checkpoint.state) if checkpoint else {}
+                pending = state.get("pending_calls", [])
+                if active_run.status != "waiting_approval" or not pending or pending[0]["call_id"] != req.call_id:
+                    raise HTTPException(409, "Approval does not match the active run checkpoint")
             command = metadata.get("command")
             host = metadata.get("host")
             if not command or not host:
                 raise HTTPException(status_code=400, detail="Approval is missing command or host")
             if approval.tool_name != "node_health_remediate":
                 raise HTTPException(status_code=400, detail="Unsupported remediation tool")
+            if not approved_snapshot(metadata):
+                await audit(session, "approval.denied", req.call_id, {"reason": "policy"})
+                await session.commit()
+                raise HTTPException(status_code=403, detail="Approval action is outside the current policy")
 
         if not await approval_repo.claim_pending(approval, approved=req.approved):
             raise HTTPException(status_code=409, detail="Approval expired, changed, or was claimed concurrently")
 
+        await audit(session, "approval.claimed", req.call_id, {"approved": req.approved})
+        await session.commit()
+
         try:
             if req.approved:
                 try:
-                    command_result = await asyncio.to_thread(
+                    command_result = await asyncio.wait_for(asyncio.to_thread(
                         NodeHealthRemediateSkill().execute_approved_command,
                         host=host, command=command,
-                    )
+                    ), timeout=settings.approval_action_timeout_seconds)
                 except Exception:
                     command_result = {}
                     logger.exception("Approved command outcome could not be confirmed")
@@ -345,6 +379,7 @@ async def approve_action(req: ApprovalDecisionRequest):
                     "stdout": None,
                     "stderr": "User rejected the requested remediation.",
                 }
+            await audit(session, "approval.resolved", req.call_id, {"status": tool_result["approval_status"]})
             await _save_approval_outcome(
                 repo, approval_repo, approval, req.conversation_id, req.approved, tool_result,
             )
@@ -378,6 +413,11 @@ async def approve_action(req: ApprovalDecisionRequest):
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
+    require("operator")
+    if settings.deployment_mode == "production":
+        raise HTTPException(410, "Use POST /api/runs for durable execution")
+    if settings.data_mode == "fixture" and req.provider != "mock":
+        raise HTTPException(422, "Fixture mode only supports the mock provider")
     agent_engine = engine
     if agent_engine is None:
         raise HTTPException(status_code=503, detail="AgentEngine not initialized")
@@ -396,6 +436,8 @@ async def chat(req: ChatRequest):
             conversation = await repo.get(req.conversation_id)
             if not conversation:
                 raise HTTPException(status_code=404, detail="Conversation not found")
+            if await session.scalar(select(Run.id).where(Run.conversation_id == req.conversation_id, Run.active_key.is_not(None)).limit(1)):
+                raise HTTPException(409, "Conversation has an active run; use its run endpoints")
         else:
             conversation = await repo.create(provider=req.provider)
 
@@ -424,7 +466,7 @@ async def chat(req: ChatRequest):
                     persist_messages = event.type in (
                         AgentEventType.FINAL_ANSWER,
                         AgentEventType.APPROVAL_REQUIRED,
-                    )
+                    ) or (event.type == AgentEventType.ERROR and "new_messages" in event.data)
                     if persist_messages:
                         await _save_new_messages(
                             stream_repo, conversation_id, event.data["new_messages"]
@@ -437,9 +479,11 @@ async def chat(req: ChatRequest):
         except Exception as exc:
             logger.exception("Chat stream failed")
             yield EventEmitter(conversation_id).error(
-                message=f"Lỗi xử lý chat stream: {exc}",
+                message="Chat stream failed. Please retry or reload the conversation.",
                 code="CHAT_STREAM_ERROR",
             ).to_sse()
+        finally:
+            await close_provider(provider)
 
     return StreamingResponse(
         generate(),
