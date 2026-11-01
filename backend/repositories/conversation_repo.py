@@ -5,22 +5,31 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repositories.models import Conversation, Message
+from core.auth import principal
+from core.clock import utcnow
 
 
 class ConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, provider: str) -> Conversation:
-        conv = Conversation(id=uuid4().hex, provider=provider)
+    async def create(self, provider: str, *, commit: bool = True) -> Conversation:
+        conv = Conversation(id=uuid4().hex, provider=provider, owner_id=principal().subject)
         self.session.add(conv)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         return conv
 
-    async def get(self, conversation_id: str) -> Conversation | None:
-        result = await self.session.execute(
-            select(Conversation).where(Conversation.id == conversation_id)
-        )
+    async def get(self, conversation_id: str, *, for_update: bool = False) -> Conversation | None:
+        query = select(Conversation).where(Conversation.id == conversation_id, Conversation.deleted_at.is_(None))
+        actor = principal()
+        if "admin" not in actor.roles:
+            query = query.where(Conversation.owner_id == actor.subject)
+        if for_update:
+            query = query.with_for_update()
+        result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
     async def add_message(
@@ -52,6 +61,7 @@ class ConversationRepository:
         self,
         conversation_id: str,
         messages: list[dict],
+        *, commit: bool = True,
     ) -> list[Message]:
         """Commit a new turn's messages together, preserving tool-call/result pairs."""
         records = []
@@ -65,18 +75,22 @@ class ConversationRepository:
 
         if records:
             self.session.add_all(records)
-            await self.session.commit()
+            if commit:
+                await self.session.commit()
+            else:
+                await self.session.flush()
         return records
 
-    async def get_messages(self, conversation_id: str) -> list[dict]:
+    async def get_messages(self, conversation_id: str, limit: int = 500, before_id: int | None = None) -> list[dict]:
+        query = select(Message).where(Message.conversation_id == conversation_id)
+        if before_id is not None:
+            query = query.where(Message.id < before_id)
         result = await self.session.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at, Message.id)
+            query.order_by(Message.id.desc()).limit(min(max(limit, 1), 500))
         )
         messages = []
-        for msg in result.scalars():
-            entry: dict = {"role": msg.role, "is_error": msg.is_error}
+        for msg in reversed(result.scalars().all()):
+            entry: dict = {"id": msg.id, "created_at": msg.created_at.isoformat(), "role": msg.role, "is_error": msg.is_error}
             if msg.content is not None:
                 entry["content"] = msg.content
             if msg.thinking_content is not None:
@@ -91,9 +105,11 @@ class ConversationRepository:
         return messages
 
     async def list_all(self) -> list[dict]:
-        result = await self.session.execute(
-            select(Conversation).order_by(Conversation.created_at.desc())
-        )
+        query = select(Conversation).where(Conversation.deleted_at.is_(None)).order_by(Conversation.created_at.desc(), Conversation.id)
+        actor = principal()
+        if "admin" not in actor.roles:
+            query = query.where(Conversation.owner_id == actor.subject)
+        result = await self.session.execute(query.limit(100))
         conversations = []
         for conv in result.scalars():
             if conv.title:
@@ -118,23 +134,27 @@ class ConversationRepository:
     async def delete(self, conversation_id: str) -> bool:
         from sqlalchemy import delete
         from repositories.models import PendingApproval
+        if await self.get(conversation_id, for_update=True) is None:
+            return False
+        active = await self.session.scalar(select(PendingApproval.id).where(
+            PendingApproval.conversation_id == conversation_id,
+            PendingApproval.status.in_(["executing", "rejecting", "unknown"]),
+        ).limit(1))
+        if active is not None:
+            from fastapi import HTTPException
+            raise HTTPException(409, "Conversation has an execution requiring reconciliation")
         
-        await self.session.execute(
-            delete(PendingApproval).where(PendingApproval.conversation_id == conversation_id)
-        )
-
-        # Delete messages first due to foreign key
-        await self.session.execute(
-            delete(Message).where(Message.conversation_id == conversation_id)
-        )
-        
-        # Delete conversation
-        result = await self.session.execute(
-            delete(Conversation).where(Conversation.id == conversation_id)
-        )
-        
+        from repositories.run_models import Run
+        active_run = await self.session.scalar(select(Run.id).where(Run.conversation_id == conversation_id, Run.active_key.is_not(None)).limit(1))
+        if active_run:
+            from fastapi import HTTPException
+            raise HTTPException(409, "Cancel or reconcile the active run before deleting this conversation")
+        conversation = await self.get(conversation_id)
+        conversation.deleted_at = utcnow()
+        from repositories.audit_repo import audit
+        await audit(self.session, "conversation.deleted", conversation_id)
         await self.session.commit()
-        return result.rowcount > 0
+        return True
 
     async def rename(self, conversation_id: str, new_title: str) -> bool:
         conv = await self.get(conversation_id)

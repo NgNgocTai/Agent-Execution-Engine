@@ -1,10 +1,11 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from repositories.models import PendingApproval
+from repositories.models import PendingApproval, RemediationGuard
+from core.config import settings
 
 
 def _utcnow() -> datetime:
@@ -12,8 +13,9 @@ def _utcnow() -> datetime:
 
 
 class ApprovalRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, commit_on_create: bool = True) -> None:
         self.session = session
+        self.commit_on_create = commit_on_create
 
     async def create_pending(
         self,
@@ -34,7 +36,10 @@ class ApprovalRepository:
             expires_at=expires_at,
         )
         self.session.add(approval)
-        await self.session.commit()
+        if self.commit_on_create:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         return approval
 
     async def get(self, conversation_id: str, call_id: str) -> PendingApproval | None:
@@ -50,6 +55,24 @@ class ApprovalRepository:
 
     async def claim_pending(self, approval: PendingApproval, *, approved: bool) -> bool:
         """Commit ownership before any remote side effect, including across workers."""
+        if approved:
+            host = json.loads(approval.approval_metadata).get("host", "").lower()
+            if self.session.bind.dialect.name == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert
+            elif self.session.bind.dialect.name == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert
+            else:
+                raise RuntimeError("Remediation claims require PostgreSQL or SQLite")
+            created = await self.session.execute(insert(RemediationGuard).values(
+                host=host, approval_id=approval.id, available_after=None,
+            ).on_conflict_do_nothing(index_elements=["host"]))
+            if not created.rowcount:
+                renewed = await self.session.execute(update(RemediationGuard).where(
+                    RemediationGuard.host == host, RemediationGuard.available_after <= _utcnow(),
+                ).values(approval_id=approval.id, available_after=None))
+                if not renewed.rowcount:
+                    await self.session.rollback()
+                    return False
         result = await self.session.execute(
             update(PendingApproval)
             .where(
@@ -64,7 +87,10 @@ class ApprovalRepository:
             .execution_options(synchronize_session="fetch")
         )
         claimed = result.rowcount == 1
-        await self.session.commit()
+        if claimed:
+            await self.session.commit()
+        else:
+            await self.session.rollback()
         return claimed
 
     async def get_pending(
@@ -131,6 +157,9 @@ class ApprovalRepository:
             .execution_options(synchronize_session="fetch")
         )
         changed = resolution.rowcount == 1
+        if changed and status == "approved":
+            await self.session.execute(update(RemediationGuard).where(RemediationGuard.approval_id == approval.id).values(
+                available_after=now + timedelta(seconds=settings.remediation_cooldown_seconds)))
         if commit:
             await self.session.commit()
         return changed
