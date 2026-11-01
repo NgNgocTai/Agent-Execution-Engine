@@ -18,6 +18,7 @@ class SkillResult(BaseModel):
     execution_time_ms: float = 0.0
     needs_approval: bool = False
     approval_metadata: dict[str, Any] | None = None
+    evidence: dict[str, Any] | None = None
 
     @property
     def success(self) -> bool:
@@ -31,6 +32,7 @@ class ToolSchema(BaseModel):
 
 
 class BaseSkill(ABC):
+    input_model: type[BaseModel] | None = None
     @property
     @abstractmethod
     def name(self) -> str: ...
@@ -47,7 +49,7 @@ class BaseSkill(ABC):
         return ToolSchema(
             name=self.name,
             description=self.description,
-            parameters=self.parameters_schema,
+            parameters=self.input_model.model_json_schema() if self.input_model else self.parameters_schema,
         )
 
     @abstractmethod

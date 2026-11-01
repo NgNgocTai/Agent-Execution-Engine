@@ -1,0 +1,14 @@
+{
+  "name": "custom_alarm_summary",
+  "version": "1.0.0",
+  "description": "Summarize a supplied alarm count and severity without accessing external systems.",
+  "entrypoint": "main.py",
+  "risk": "read_only",
+  "network": "none",
+  "input_fields": [
+    {"name": "severity", "kind": "string", "required": true},
+    {"name": "count", "kind": "integer", "required": true}
+  ],
+  "sample_input": {"severity": "Critical", "count": 4},
+  "timeout_seconds": 10
+}
