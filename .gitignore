@@ -32,6 +32,9 @@ env/
 node_modules/
 dist/
 dist-ssr/
+*.tsbuildinfo
+.check-results/
+.ruff_cache/
 *.local
 
 # IDEs and Editors
