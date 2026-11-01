@@ -4,6 +4,7 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import ReasoningTrace from "./ReasoningTrace";
 import ChatInput from "./ChatInput";
+import RunStatus from "./RunStatus";
 import { useChat } from "../hooks/useChat";
 import {
   deleteConversation,
@@ -41,6 +42,7 @@ export default function ChatLayout() {
   const {
     messages, conversationId, isStreaming, currentProvider,
     send, newChat, switchProvider, toggleTab, loadConversation, approveDecision,
+    stop, runStatus, connection, timeline, error, notice, intervene, reconcile,
   } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -49,6 +51,7 @@ export default function ChatLayout() {
   const isAutoScrollEnabled = useRef(true);
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>(DEFAULT_PROVIDERS);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
@@ -101,6 +104,7 @@ export default function ChatLayout() {
       .then((config) => {
         if (cancelled || !config.providers.length) return;
         const nextProviders = config.providers.map(toProviderOption);
+        setIsAdmin(config.actor?.roles.includes("admin") || false);
         setProviders(nextProviders);
         if (!config.providers.includes(currentProvider)) {
           switchProvider(config.providers[0]);
@@ -211,6 +215,7 @@ export default function ChatLayout() {
           </div>
         </main>
 
+        <RunStatus status={runStatus} connection={connection} error={error} timeline={timeline} onStop={stop} notice={notice} isAdmin={isAdmin} onIntervene={intervene} onReconcile={reconcile} />
         <ChatInput
           onSend={send}
           isStreaming={isStreaming}

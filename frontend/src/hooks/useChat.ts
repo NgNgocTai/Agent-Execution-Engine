@@ -1,742 +1,119 @@
-import { useCallback, useRef, useState } from "react";
-import type { ChatMessage, ToolCallCard } from "../types";
-import { approveAction, sendMessage, getConversationMessages } from "../lib/api";
-
-function appendThinkingContent(message: ChatMessage, content: string, isExpanded: boolean) {
-  const lastBlock = message.thinkingBlocks[message.thinkingBlocks.length - 1];
-  if (lastBlock) {
-    lastBlock.content += `${lastBlock.content ? "\n\n" : ""}${content}`;
-  } else {
-    message.thinkingBlocks.push({ content, isExpanded });
-  }
-}
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ChatMessage } from "../types";
+import { approveAction, getConversationMessages } from "../lib/api";
+import { cancelRun, decideRun, getRuns, startRun, interveneRun, reconcileRun, type RunSummary } from "../lib/runs";
+import { activeStatus, emptyRun } from "../lib/runReducer";
+import { chatHistory, chatMessage } from "../lib/chatHistory";
+import { readSSE } from "../lib/sse";
+import { useRunStream } from "./useRunStream";
 
 export function useChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [history, setHistory] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [isStreaming, setIsStreaming] = useState(false);
   const [currentProvider, setCurrentProvider] = useState("openai");
-  const abortRef = useRef<AbortController | null>(null);
-  const lastThinkingIterationRef = useRef<number | null>(null);
+  const [run, setRun] = useState<RunSummary | null>(null);
+  const [epoch, setEpoch] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const generation = useRef(0);
+  const busyRef = useRef(false);
+  const retryKey = useRef<{ signature: string; key: string } | null>(null);
+  const { state, setState, connection } = useRunStream(run?.run_id || null, epoch);
+  const isStreaming = busy || activeStatus(state?.status || run?.status || "");
 
-  const now = () =>
-    new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-
-  const send = useCallback(
-    async (message: string) => {
-      if (isStreaming || !message.trim()) return;
-
-      const userMsg: ChatMessage = {
-        role: "user",
-        content: message,
-        thinkingBlocks: [],
-        toolCallCards: [],
-        textContent: "",
-        isStreaming: false,
-        timestamp: now(),
-      };
-
-      const assistantMsg: ChatMessage = {
-        role: "assistant",
-        content: "",
-        thinkingBlocks: [],
-        toolCallCards: [],
-        textContent: "",
-        isStreaming: true,
-        timestamp: now(),
-      };
-
-      setMessages((prev) => [...prev, userMsg, assistantMsg]);
-      setIsStreaming(true);
-      lastThinkingIterationRef.current = null;
-
-      const abort = new AbortController();
-      abortRef.current = abort;
-
-      try {
-        const resp = await sendMessage(message, currentProvider, conversationId, abort.signal);
-
-        if (!resp.ok) {
-          const text = await resp.text();
-          let errorMessage = text || `HTTP ${resp.status}`;
-          try {
-            const parsed = JSON.parse(text);
-            errorMessage = parsed.error || parsed.detail || errorMessage;
-          } catch {
-            // keep raw text
-          }
-          throw new Error(errorMessage);
-        }
-
-        if (!resp.body) {
-          throw new Error("Server returned an empty response body.");
-        }
-
-        const contentType = resp.headers.get("content-type") || "";
-        if (!contentType.includes("text/event-stream")) {
-          const text = await resp.text();
-          let errorMessage = text || "Server returned a non-streaming response.";
-          try {
-            const parsed = JSON.parse(text);
-            errorMessage = parsed.error || parsed.detail || errorMessage;
-          } catch {
-            // keep raw text
-          }
-          throw new Error(errorMessage);
-        }
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let sawTerminalEvent = false;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop()!;
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            if (line === "data: [DONE]") continue;
-
-            try {
-              const event = JSON.parse(line.slice(6));
-              const etype = event.type;
-              const edata = event.data;
-
-              if (etype === "thinking") {
-                const iteration = typeof event.iteration === "number" ? event.iteration : null;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  const blocks = [...updated[last].thinkingBlocks];
-                  const content =
-                    iteration !== null &&
-                    lastThinkingIterationRef.current !== null &&
-                    iteration !== lastThinkingIterationRef.current
-                      ? `\n\n${edata.content || ""}`
-                      : edata.content || "";
-                  if (blocks.length > 0) {
-                    // Append vào thinking block cuối cùng (streaming dần)
-                    blocks[blocks.length - 1] = {
-                      ...blocks[blocks.length - 1],
-                      content: blocks[blocks.length - 1].content + content,
-                    };
-                  } else {
-                    // Tạo thinking block mới
-                    blocks.push({ content: edata.content || "", isExpanded: true });
-                  }
-                  updated[last] = { ...updated[last], thinkingBlocks: blocks };
-                  return updated;
-                });
-                lastThinkingIterationRef.current = iteration;
-              }
-
-              if (etype === "tool_call_start") {
-                const rawName = edata.tool_name || "";
-                const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
-                const card: ToolCallCard = {
-                  callId: edata.call_id || `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                  toolName: cleanName,
-                  arguments: edata.arguments || {},
-                  status: "loading",
-                  result: null,
-                  error: null,
-                  executionTimeMs: 0,
-                  showInput: true,
-                };
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  updated[last] = {
-                    ...updated[last],
-                    toolCallCards: [...updated[last].toolCallCards, card],
-                  };
-                  return updated;
-                });
-              }
-
-              if (etype === "tool_call_result") {
-                // business_error (như không có data) vẫn coi là tool chạy thành công trên UI
-                const status = (edata.status === "success" || edata.status === "business_error")
-                  ? "success" as const
-                  : "error" as const;
-
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const cards = [...prev[last].toolCallCards];
-                  const directIdx = cards.findIndex((c) => c.callId === edata.call_id);
-                  const loadingIdx = [...cards].reverse().findIndex((c) => c.status === "loading");
-                  if (directIdx === -1 && loadingIdx === -1) return prev;
-                  const idx = directIdx !== -1 ? directIdx : cards.length - 1 - loadingIdx;
-                  cards[idx] = {
-                    ...cards[idx],
-                    status,
-                    result: edata.result || null,
-                    error: edata.error || null,
-                    executionTimeMs: edata.execution_time_ms || 0,
-                  };
-                  const updated = [...prev];
-                  updated[last] = { ...updated[last], toolCallCards: cards };
-                  return updated;
-                });
-              }
-
-              if (etype === "approval_required") {
-                sawTerminalEvent = true;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const cards = [...prev[last].toolCallCards];
-                  const directIdx = cards.findIndex((c) => c.callId === edata.call_id);
-                  const loadingIdx = [...cards].reverse().findIndex((c) => c.status === "loading");
-                  const idx = directIdx !== -1
-                    ? directIdx
-                    : loadingIdx !== -1
-                      ? cards.length - 1 - loadingIdx
-                      : -1;
-                  if (idx === -1) return prev;
-                  cards[idx] = {
-                    ...cards[idx],
-                    status: "approval_required",
-                    approval: edata.approval || null,
-                    result: edata.approval || null,
-                    error: null,
-                    executionTimeMs: 0,
-                  };
-                  const updated = [...prev];
-                  updated[last] = {
-                    ...updated[last],
-                    toolCallCards: cards,
-                    isStreaming: false,
-                  };
-                  return updated;
-                });
-                setIsStreaming(false);
-              }
-
-              if (etype === "text_delta") {
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  updated[last] = {
-                    ...updated[last],
-                    textContent: updated[last].textContent + (edata.content || ""),
-                  };
-                  return updated;
-                });
-              }
-
-              if (etype === "final_answer") {
-                sawTerminalEvent = true;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  updated[last] = { ...updated[last], isStreaming: false };
-                  return updated;
-                });
-                setIsStreaming(false);
-              }
-
-              if (etype === "conversation_id") {
-                setConversationId(edata.conversation_id);
-              }
-
-              if (etype === "error") {
-                sawTerminalEvent = true;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  updated[last] = {
-                    ...updated[last],
-                    textContent: updated[last].textContent + `\n\n❌ ${edata.message}`,
-                    isStreaming: false,
-                  };
-                  return updated;
-                });
-                setIsStreaming(false);
-              }
-            } catch {
-              // skip malformed JSON
-            }
-          }
-        }
-
-        if (!sawTerminalEvent) {
-          setMessages((prev) => {
-            const last = prev.length - 1;
-            if (last < 0 || prev[last].role !== "assistant") return prev;
-            const updated = [...prev];
-            updated[last] = { ...updated[last], isStreaming: false };
-            return updated;
-          });
-          setIsStreaming(false);
-        }
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setMessages((prev) => {
-            const last = prev.length - 1;
-            if (last < 0) return prev;
-            const updated = [...prev];
-            updated[last] = {
-              ...updated[last],
-              textContent: `❌ ${(err as Error).message}`,
-              isStreaming: false,
-            };
-            return updated;
-          });
-        }
-        setIsStreaming(false);
-      }
-    },
-    [isStreaming, currentProvider, conversationId],
-  );
-
-  const approveDecision = useCallback(
-    async (callId: string, approved: boolean) => {
-      if (!conversationId || isStreaming) return;
-
-      setIsStreaming(true);
-      setMessages((prev) => {
-        const updated = [...prev];
-        const last = updated.length - 1;
-        if (last < 0 || updated[last].role !== "assistant") return prev;
-        updated[last] = {
-          ...updated[last],
-          isStreaming: true,
-          toolCallCards: updated[last].toolCallCards.map((card) =>
-            card.callId === callId
-              ? {
-                  ...card,
-                  status: "loading",
-                  result: approved ? card.result : "Rejected by user",
-                  error: null,
-                }
-              : card,
-          ),
-        };
-        return updated;
-      });
-
-      const abort = new AbortController();
-      abortRef.current = abort;
-
-      try {
-        const resp = await approveAction(conversationId, callId, approved, abort.signal);
-
-        if (!resp.ok) {
-          const text = await resp.text();
-          let errorMessage = text || `HTTP ${resp.status}`;
-          try {
-            const parsed = JSON.parse(text);
-            errorMessage = parsed.error || parsed.detail || errorMessage;
-          } catch {
-            // keep raw text
-          }
-          throw new Error(errorMessage);
-        }
-
-        if (!resp.body) {
-          throw new Error("Server returned an empty response body.");
-        }
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let sawTerminalEvent = false;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop()!;
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            if (line === "data: [DONE]") continue;
-
-            try {
-              const event = JSON.parse(line.slice(6));
-              const etype = event.type;
-              const edata = event.data;
-
-              if (etype === "thinking") {
-                const iteration = typeof event.iteration === "number" ? event.iteration : null;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  const blocks = [...updated[last].thinkingBlocks];
-                  const content =
-                    iteration !== null &&
-                    lastThinkingIterationRef.current !== null &&
-                    iteration !== lastThinkingIterationRef.current
-                      ? `\n\n${edata.content || ""}`
-                      : edata.content || "";
-                  if (blocks.length > 0) {
-                    blocks[blocks.length - 1] = {
-                      ...blocks[blocks.length - 1],
-                      content: blocks[blocks.length - 1].content + content,
-                    };
-                  } else {
-                    blocks.push({ content: edata.content || "", isExpanded: true });
-                  }
-                  updated[last] = { ...updated[last], thinkingBlocks: blocks };
-                  return updated;
-                });
-                lastThinkingIterationRef.current = iteration;
-              }
-
-              if (etype === "tool_call_start") {
-                const rawName = edata.tool_name || "";
-                const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
-                const card: ToolCallCard = {
-                  callId: edata.call_id || `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                  toolName: cleanName,
-                  arguments: edata.arguments || {},
-                  status: "loading",
-                  result: null,
-                  error: null,
-                  executionTimeMs: 0,
-                  showInput: true,
-                };
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  updated[last] = {
-                    ...updated[last],
-                    toolCallCards: [...updated[last].toolCallCards, card],
-                  };
-                  return updated;
-                });
-              }
-
-              if (etype === "tool_call_result") {
-                const status = (edata.status === "success" || edata.status === "business_error")
-                  ? "success" as const
-                  : "error" as const;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const cards = [...prev[last].toolCallCards];
-                  const directIdx = cards.findIndex((c) => c.callId === edata.call_id);
-                  const loadingIdx = [...cards].reverse().findIndex((c) => c.status === "loading");
-                  if (directIdx === -1 && loadingIdx === -1) return prev;
-                  const idx = directIdx !== -1 ? directIdx : cards.length - 1 - loadingIdx;
-                  cards[idx] = {
-                    ...cards[idx],
-                    status,
-                    result: edata.result || null,
-                    error: edata.error || null,
-                    executionTimeMs: edata.execution_time_ms || 0,
-                  };
-                  const updated = [...prev];
-                  updated[last] = { ...updated[last], toolCallCards: cards };
-                  return updated;
-                });
-              }
-
-              if (etype === "approval_required") {
-                sawTerminalEvent = true;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const cards = [...prev[last].toolCallCards];
-                  const directIdx = cards.findIndex((c) => c.callId === edata.call_id);
-                  if (directIdx === -1) return prev;
-                  cards[directIdx] = {
-                    ...cards[directIdx],
-                    status: "approval_required",
-                    approval: edata.approval || null,
-                    result: edata.approval || null,
-                  };
-                  const updated = [...prev];
-                  updated[last] = { ...updated[last], toolCallCards: cards, isStreaming: false };
-                  return updated;
-                });
-                setIsStreaming(false);
-              }
-
-              if (etype === "text_delta") {
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  updated[last] = {
-                    ...updated[last],
-                    textContent: updated[last].textContent + (edata.content || ""),
-                  };
-                  return updated;
-                });
-              }
-
-              if (etype === "final_answer") {
-                sawTerminalEvent = true;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  updated[last] = { ...updated[last], isStreaming: false };
-                  return updated;
-                });
-                setIsStreaming(false);
-              }
-
-              if (etype === "conversation_id") {
-                setConversationId(edata.conversation_id);
-              }
-
-              if (etype === "error") {
-                sawTerminalEvent = true;
-                setMessages((prev) => {
-                  const last = prev.length - 1;
-                  if (last < 0 || prev[last].role !== "assistant") return prev;
-                  const updated = [...prev];
-                  updated[last] = {
-                    ...updated[last],
-                    textContent: updated[last].textContent + `\n\n❌ ${edata.message}`,
-                    isStreaming: false,
-                  };
-                  return updated;
-                });
-                setIsStreaming(false);
-              }
-            } catch {
-              // skip malformed JSON
-            }
-          }
-        }
-
-        if (!sawTerminalEvent) {
-          setMessages((prev) => {
-            const last = prev.length - 1;
-            if (last < 0 || prev[last].role !== "assistant") return prev;
-            const updated = [...prev];
-            updated[last] = { ...updated[last], isStreaming: false };
-            return updated;
-          });
-          setIsStreaming(false);
-        }
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setMessages((prev) => {
-            const last = prev.length - 1;
-            if (last < 0 || prev[last].role !== "assistant") return prev;
-            const updated = [...prev];
-            updated[last] = {
-              ...updated[last],
-              textContent: updated[last].textContent + `\n\n❌ Approval error: ${(err as Error).message}`,
-              isStreaming: false,
-              toolCallCards: updated[last].toolCallCards.map((card) =>
-                card.callId === callId ? { ...card, status: "error", error: (err as Error).message } : card,
-              ),
-            };
-            return updated;
-          });
-        }
-        setIsStreaming(false);
-      }
-    },
-    [conversationId, isStreaming],
-  );
-
-  const newChat = useCallback(() => {
-    abortRef.current?.abort();
-    lastThinkingIterationRef.current = null;
-    setMessages([]);
-    setConversationId(null);
-    setIsStreaming(false);
-  }, []);
-
-  const toggleTab = useCallback((callId: string, showInput: boolean) => {
-    setMessages((prev) =>
-      prev.map((msg) => ({
-        ...msg,
-        toolCallCards: msg.toolCallCards.map((c) =>
-          c.callId === callId ? { ...c, showInput } : c,
-        ),
-      })),
-    );
-  }, []);
-
-  const loadConversation = useCallback(async (cid: string) => {
-    abortRef.current?.abort();
-    setIsStreaming(false);
-
+  const loadConversation = useCallback(async (id: string) => {
+    const view = ++generation.current;
+    setRun(null); setError(null); setNotice(""); setConversationId(id); setBusy(true);
     try {
-      const data = await getConversationMessages(cid);
-      const loaded: ChatMessage[] = [];
-
-      for (const msg of data.messages) {
-        if (msg.role === "user") {
-          loaded.push({
-            role: "user",
-            content: msg.content || "",
-            thinkingBlocks: [],
-            toolCallCards: [],
-            textContent: "",
-            isStreaming: false,
-            timestamp: "",
-          });
-        } else {
-          // Group consecutive assistant and tool messages into a single ChatMessage
-          let lastMsg = loaded[loaded.length - 1];
-          if (!lastMsg || lastMsg.role !== "assistant") {
-            lastMsg = {
-              role: "assistant",
-              content: "",
-              thinkingBlocks: [],
-              toolCallCards: [],
-              textContent: "",
-              isStreaming: false,
-              timestamp: "",
-            };
-            loaded.push(lastMsg);
-          }
-
-          if (msg.role === "assistant") {
-            if (msg.thinking_content) {
-              appendThinkingContent(lastMsg, msg.thinking_content, false);
-            }
-
-            if (msg.content) {
-              lastMsg.textContent += (lastMsg.textContent ? "\n\n" : "") + msg.content;
-            }
-            if (msg.tool_calls) {
-              const newCards = msg.tool_calls.map((tc: any) => {
-                // Hỗ trợ cả 2 format: OpenAI gốc và NormalizedToolCall mới
-                const rawName = (tc.function && tc.function.name) || tc.tool_name || "";
-                const cleanName = rawName.replace(/<\|.*?\|>/g, "").trim();
-                
-                let parsedArgs = tc.arguments || {};
-                if (tc.function && tc.function.arguments) {
-                  try {
-                    parsedArgs = JSON.parse(tc.function.arguments);
-                  } catch {
-                    parsedArgs = {};
-                  }
-                } else if (typeof parsedArgs === "string") {
-                  try {
-                    parsedArgs = JSON.parse(parsedArgs);
-                  } catch {
-                    parsedArgs = {};
-                  }
-                }
-
-                return {
-                  callId: tc.id || tc.call_id,
-                  toolName: cleanName,
-                  arguments: parsedArgs,
-                  status: "success" as const,
-                  result: null,
-                  error: null,
-                  executionTimeMs: 0,
-                  showInput: false,
-                };
-              });
-              lastMsg.toolCallCards.push(...newCards);
-
-              if (!msg.content && !msg.thinking_content) {
-                const toolNames = newCards.map((c: any) => c.toolName).join(", ");
-                appendThinkingContent(lastMsg, `Tiến hành gọi công cụ: ${toolNames}...`, false);
-              }
-            }
-          } else if (msg.role === "tool") {
-            const card = lastMsg.toolCallCards.find((c) => c.callId === msg.tool_call_id);
-            if (card) {
-              try {
-                const parsed = JSON.parse(msg.content || "{}");
-                card.result = parsed;
-              } catch {
-                card.result = msg.content || null;
-              }
-            } else if (lastMsg.toolCallCards.length > 0) {
-              // Fallback if tool_call_id is missing/mismatched: append to the last tool card
-              const lastCard = lastMsg.toolCallCards[lastMsg.toolCallCards.length - 1];
-              try {
-                lastCard.result = JSON.parse(msg.content || "{}");
-              } catch {
-                lastCard.result = msg.content || null;
-              }
-            }
-          }
+      const [data, listing] = await Promise.all([getConversationMessages(id), getRuns(id)]);
+      if (view !== generation.current) return;
+      setCurrentProvider(data.provider);
+      const latest = listing.runs[0];
+      if (latest) {
+        let lastUser = latest.user_message_id ? data.messages.findIndex(message => message.id === latest.user_message_id) : -1;
+        if (lastUser < 0) {
+          lastUser = data.messages.length - 1;
+          while (lastUser >= 0 && data.messages[lastUser].role !== "user") lastUser--;
         }
+        setHistory(chatHistory({ ...data, messages: data.messages.slice(0, lastUser + 1), pending_approvals: [] }));
+        setState(emptyRun(latest.run_id)); setRun(latest); setEpoch(value => value + 1);
+      } else setHistory(chatHistory(data));
+    } catch (failure) { if (view === generation.current) setError((failure as Error).message); }
+    finally { if (view === generation.current) setBusy(false); }
+  }, [setState]);
+
+  useEffect(() => {
+    const selected = sessionStorage.getItem("noc-selected-conversation");
+    if (selected) void loadConversation(selected);
+  }, [loadConversation]);
+  useEffect(() => {
+    if (conversationId) sessionStorage.setItem("noc-selected-conversation", conversationId);
+    else sessionStorage.removeItem("noc-selected-conversation");
+  }, [conversationId]);
+
+  const send = useCallback(async (text: string) => {
+    if (busyRef.current || isStreaming || state?.status === "waiting_approval" || !text.trim()) return;
+    const view = generation.current;
+    busyRef.current = true; setBusy(true); setError(null); setNotice("");
+    const signature = JSON.stringify([text, currentProvider, conversationId]);
+    if (retryKey.current?.signature !== signature) retryKey.current = { signature, key: crypto.randomUUID() };
+    try {
+      const accepted = await startRun(text, currentProvider, conversationId, retryKey.current.key);
+      if (view !== generation.current) return;
+      setHistory(previous => [...previous, ...(state ? [{ ...chatMessage("assistant", state.text), toolCallCards: state.cards }] : []), chatMessage("user", text)]);
+      setState(emptyRun(accepted.run_id)); setRun(accepted); setConversationId(accepted.conversation_id);
+      setEpoch(value => value + 1); retryKey.current = null;
+    } catch (failure) { if (view === generation.current) setError((failure as Error).message); }
+    finally { busyRef.current = false; if (view === generation.current) setBusy(false); }
+  }, [state, currentProvider, conversationId, isStreaming, setState]);
+
+  const approveDecision = useCallback(async (callId: string, approved: boolean) => {
+    if (!conversationId || busyRef.current) return;
+    const view = generation.current;
+    busyRef.current = true; setBusy(true); setError(null);
+    try {
+      if (run) {
+        const result = await decideRun(run.run_id, callId, approved);
+        if (view !== generation.current) return;
+        setState(previous => previous ? { ...previous, status: result.status, cards: previous.cards.map(card => card.callId === callId ? { ...card, status: approved && result.status !== "unknown" ? "loading" : "error", error: result.status === "unknown" ? "Outcome unknown; reconciliation required" : approved ? null : "Rejected by user" } : card) } : previous);
+        setEpoch(value => value + 1);
+      } else {
+        const response = await approveAction(conversationId, callId, approved);
+        for await (const frame of readSSE(response)) JSON.parse(frame.data);
+        if (view === generation.current) await loadConversation(conversationId);
       }
+    } catch (failure) { if (view === generation.current) setError((failure as Error).message); }
+    finally { busyRef.current = false; if (view === generation.current) setBusy(false); }
+  }, [conversationId, run, loadConversation, setState]);
 
-      for (const pending of data.pending_approvals || []) {
-        let target = loaded
-          .filter((msg) => msg.role === "assistant")
-          .find((msg) => msg.toolCallCards.some((card) => card.callId === pending.call_id));
-
-        if (!target) {
-          target = {
-            role: "assistant",
-            content: "",
-            thinkingBlocks: [],
-            toolCallCards: [],
-            textContent: "",
-            isStreaming: false,
-            timestamp: "",
-          };
-          loaded.push(target);
-        }
-
-        const existing = target.toolCallCards.find((card) => card.callId === pending.call_id);
-        if (existing) {
-          existing.status = "approval_required";
-          existing.approval = pending.approval;
-          existing.result = pending.approval;
-        } else {
-          target.toolCallCards.push({
-            callId: pending.call_id,
-            toolName: pending.tool_name,
-            arguments: pending.arguments || {},
-            status: "approval_required",
-            result: pending.approval,
-            error: null,
-            executionTimeMs: 0,
-            showInput: true,
-            approval: pending.approval,
-          });
-        }
-      }
-
-      setMessages(loaded);
-      setConversationId(cid);
-    } catch (err) {
-      console.error("Failed to load conversation:", err);
-    }
+  const stop = useCallback(async () => {
+    if (!run) return;
+    const view = generation.current;
+    try { const result = await cancelRun(run.run_id); if (view === generation.current) setState(previous => previous ? { ...previous, status: result.status } : previous); }
+    catch (failure) { if (view === generation.current) setError((failure as Error).message); }
+  }, [run, setState]);
+  const intervene = useCallback(async (text: string) => {
+    if (!run) return;
+    const view = generation.current;
+    try { await interveneRun(run.run_id, text); if (view === generation.current) setNotice("Accepted. The intervention applies after the current tool batch; it does not change the approval action."); }
+    catch (failure) { if (view === generation.current) setError((failure as Error).message); }
+  }, [run]);
+  const reconcile = useCallback(async (outcome: string, evidence: string) => {
+    if (!run) return;
+    const view = generation.current;
+    try { const result = await reconcileRun(run.run_id, outcome, evidence); if (view === generation.current) { setState(previous => previous ? { ...previous, status: result.status } : previous); setNotice("Reconciliation recorded. No command was rerun."); } }
+    catch (failure) { if (view === generation.current) setError((failure as Error).message); }
+  }, [run, setState]);
+  const newChat = useCallback(() => {
+    generation.current++; setHistory([]); setRun(null); setConversationId(null); setError(null); setNotice(""); setBusy(false); retryKey.current = null;
   }, []);
-
-  const switchProvider = useCallback(
-    (provider: string) => {
-      setCurrentProvider(provider);
-    },
-    [],
-  );
-
-  return {
-    messages,
-    conversationId,
-    isStreaming,
-    currentProvider,
-    send,
-    newChat,
-    switchProvider,
-    toggleTab,
-    loadConversation,
-    approveDecision,
-  };
+  const switchProvider = useCallback((provider: string) => { newChat(); setCurrentProvider(provider); }, [newChat]);
+  const toggleTab = useCallback((callId: string, showInput: boolean) => {
+    setState(previous => previous ? { ...previous, cards: previous.cards.map(card => card.callId === callId ? { ...card, showInput } : card) } : previous);
+    setHistory(previous => previous.map(item => ({ ...item, toolCallCards: item.toolCallCards.map(card => card.callId === callId ? { ...card, showInput } : card) })));
+  }, [setState]);
+  const live: ChatMessage[] = state ? [{ ...chatMessage("assistant", state.text), toolCallCards: state.cards, isStreaming: activeStatus(state.status) }] : [];
+  return { messages: [...history, ...live], conversationId, currentProvider, isStreaming, send, newChat, switchProvider, toggleTab, loadConversation, approveDecision, stop,
+    runStatus: state?.status || null, connection, timeline: state?.timeline || [], error: error || state?.error || null, notice, intervene, reconcile };
 }
