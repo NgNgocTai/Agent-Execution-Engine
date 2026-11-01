@@ -3,10 +3,13 @@ from typing import Any, TypeAlias
 from uuid import uuid4
 
 import time
+import json
+from core.redaction import redact
 from pydantic import BaseModel, Field
 
 
 class AgentEventType(str, Enum):
+    PROGRESS = "progress"
     THINKING = "thinking"
     TOOL_CALL_START = "tool_call_start"
     TOOL_CALL_RESULT = "tool_call_result"
@@ -28,12 +31,13 @@ class AgentEvent(BaseModel):
     iteration: int | None = None
 
     def to_sse(self) -> str:
-        return f"data: {self.model_dump_json()}\n\n"
+        public = self.model_dump(mode="json")
+        return f"data: {json.dumps(redact(public), ensure_ascii=False, separators=(',', ':'))}\n\n"
 
 
 class NormalizedToolCall(BaseModel):
-    call_id: str
-    tool_name: str
+    call_id: str = Field(min_length=1, max_length=100)
+    tool_name: str = Field(min_length=1, max_length=100)
     arguments: dict
 
 
@@ -45,6 +49,7 @@ class NormalizedMessage(BaseModel):
     tool_call_id: str | None = None
     tool_name: str | None = None
     is_error: bool = False
+    source_id: str | None = None
 
 
 class NormalizedResponse(BaseModel):
