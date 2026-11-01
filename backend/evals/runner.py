@@ -762,7 +762,14 @@ def main() -> int:
                 exit_code = 1
         return exit_code
 
-    return asyncio.run(_run())
+    # Deterministic fixtures have no remote connector. Scope their fake nodes
+    # explicitly instead of weakening the production policy defaults.
+    from unittest.mock import patch
+    from core.config import settings
+    with (patch.object(settings, "ssh_allowed_hosts", "NOC-APP-01"),
+          patch.object(settings, "ssh_allowed_services", "alert-engine"),
+          patch.object(settings, "allow_docker_restart", True)):
+        return asyncio.run(_run())
 
 
 if __name__ == "__main__":

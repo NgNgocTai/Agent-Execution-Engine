@@ -1,11 +1,14 @@
+import asyncio
 import logging
 
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
+from services.skills.input_models import InventoryInput
 
 logger = logging.getLogger(__name__)
 
 
 class DeviceInventoryLookupSkill(BaseSkill):
+    input_model = InventoryInput
     def __init__(self, alarm_repo, device_repo) -> None:
         self.alarm_repo = alarm_repo
         self.device_repo = device_repo
@@ -62,7 +65,12 @@ class DeviceInventoryLookupSkill(BaseSkill):
         try:
             # Step 1: Find device in PostgreSQL
             device = None
-            if device_name:
+            if hasattr(self.device_repo, "find_device_candidates"):
+                candidates = await self.device_repo.find_device_candidates(device_name=device_name, ip_address=ip_address, device_id=device_id)
+                if len(candidates) > 1:
+                    return SkillResult(status=SkillStatus.BUSINESS_ERROR, data={"candidates": candidates[:20], "truncated": len(candidates) > 20}, error="Ambiguous device identity; select an exact device_id")
+                device = candidates[0] if candidates else None
+            elif device_name:
                 device = await self.device_repo.get_device_with_details(
                     device_name=device_name
                 )
@@ -85,7 +93,7 @@ class DeviceInventoryLookupSkill(BaseSkill):
                 )
 
             # Step 2: Get active alarms for this device
-            active_alarms = self.alarm_repo.get_active_alarms_by_device(
+            active_alarms = await asyncio.to_thread(self.alarm_repo.get_active_alarms_by_device,
                 device["device_id"], limit=20
             )
 
@@ -102,6 +110,8 @@ class DeviceInventoryLookupSkill(BaseSkill):
                     },
                     "active_alarms": active_alarms,
                     "active_alarm_count": len(active_alarms),
+                    "active_alarms_truncated": len(active_alarms) >= 20,
+                    "active_alarm_count_is_lower_bound": len(active_alarms) >= 20,
                 },
             )
         except Exception as e:

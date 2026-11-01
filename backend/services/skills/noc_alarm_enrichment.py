@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import re
 
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
+from services.skills.input_models import AlarmEnrichmentInput
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ DEFAULT_PATTERNS: dict[str, dict] = {
 
 
 class NocAlarmEnrichmentSkill(BaseSkill):
+    input_model = AlarmEnrichmentInput
     def __init__(self, alarm_repo=None, device_repo=None) -> None:
         self.alarm_repo = alarm_repo
         self.device_repo = device_repo
@@ -80,8 +83,8 @@ class NocAlarmEnrichmentSkill(BaseSkill):
             "Điều tra và làm giàu cảnh báo NOC: lấy cảnh báo theo loại alarm_type "
             "trong cửa sổ thời gian window_min phút, trích xuất entity (IP, tên NE, "
             "interface, cell, AS, VLAN, key=value) từ content, tra cứu inventory để lấy "
-            "vendor, station_name, device_type. Hỗ trợ custom_patterns để bổ sung regex "
-            "trích xuất riêng mà không cần sửa code."
+            "vendor, station_name, device_type. Dùng regex built-in đã review; custom regex "
+            "cần một skill version được review trong sandbox."
         )
 
     @property
@@ -139,7 +142,7 @@ class NocAlarmEnrichmentSkill(BaseSkill):
 
         error_code = error_info["error_code"]
 
-        alarms, total_alarms = self.alarm_repo.get_alarms(error_code, window_min, limit=50)
+        alarms, total_alarms = await asyncio.to_thread(self.alarm_repo.get_alarms, error_code, window_min, limit=50)
         if not alarms:
             return SkillResult(
                 status=SkillStatus.BUSINESS_ERROR,
@@ -184,6 +187,7 @@ class NocAlarmEnrichmentSkill(BaseSkill):
                 devices = await self.device_repo.get_devices_by_names(lookup_keys)
                 for d in devices:
                     enrichment.append({
+                        "device_id": d["device_id"],
                         "device_name": d["name"],
                         "ip_address": d["ip_address"],
                         "device_type": d["device_type"],
@@ -212,6 +216,7 @@ class NocAlarmEnrichmentSkill(BaseSkill):
                 "time_solved": alarm.get("time_solved"),
                 "extracted": extracted,
                 "enrichment": enrichment,
+                "inventory_match_status": "unmatched" if not enrichment else "candidate" if len(enrichment) == 1 else "multiple_candidates",
             })
 
         note_parts = []
@@ -233,6 +238,7 @@ class NocAlarmEnrichmentSkill(BaseSkill):
                 "alarms": enriched,
                 "total_alarms_in_db": total_alarms,
                 "displayed_alarms": len(enriched),
+                "truncated": total_alarms > len(enriched),
                 "alarm_type": alarm_type,
                 "error_info": error_info,
                 "window_min": window_min,

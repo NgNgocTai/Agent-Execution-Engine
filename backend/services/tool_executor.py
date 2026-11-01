@@ -1,6 +1,12 @@
 import asyncio
 import logging
 import time
+import json
+from pydantic import ValidationError
+from core.policy import Decision, plan
+from core.redaction import redact
+from services.evidence import evidence
+from core.config import settings
 
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
 from services.skills.registry import SkillRegistry
@@ -25,13 +31,26 @@ class ToolExecutor:
             )
 
         start = time.monotonic()
+        if skill.input_model:
+            try:
+                arguments = skill.input_model.model_validate(arguments).model_dump()
+            except ValidationError as exc:
+                fields = [".".join(str(part) for part in error["loc"]) or "input" for error in exc.errors()]
+                return SkillResult(status=SkillStatus.BUSINESS_ERROR, data={"error_code": "INVALID_TOOL_INPUT", "fields": fields}, error="Invalid tool input: " + ", ".join(fields))
+        if plan(tool_name, arguments) == Decision.DENY:
+            return SkillResult(status=SkillStatus.BUSINESS_ERROR, data={"error_code": "POLICY_DENIED"}, error="Target is outside the allowed action scope")
         try:
             result = await asyncio.wait_for(
                 skill.execute(**arguments),
                 timeout=SKILL_TIMEOUT_SECONDS,
             )
             elapsed_ms = (time.monotonic() - start) * 1000
-            return result.model_copy(update={"execution_time_ms": elapsed_ms})
+            safe_data = redact(result.data)
+            if len(json.dumps(safe_data, ensure_ascii=False, default=str).encode()) > settings.tool_output_max_bytes:
+                totals = {key: safe_data[key] for key in ("total_alarms", "total_alarms_in_db", "displayed_alarms", "active_alarm_count") if isinstance(safe_data, dict) and key in safe_data}
+                safe_data = {**totals, "truncated": True, "warnings": ["Result exceeded the output budget; narrow the query. Detailed records were withheld."]}
+            return result.model_copy(update={"execution_time_ms": elapsed_ms, "data": safe_data, "error": redact(result.error),
+                "evidence": evidence(skill, arguments, safe_data) if result.success else None})
 
         except asyncio.TimeoutError:
             logger.warning("Tool '%s' timeout after %ds", tool_name, SKILL_TIMEOUT_SECONDS)

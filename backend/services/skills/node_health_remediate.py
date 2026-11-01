@@ -1,33 +1,17 @@
 import asyncio
 import shlex
+import time
 from datetime import datetime, timezone
 
 import paramiko
 
 from core.config import settings
+from core.policy import approved_snapshot, target_allowed
+from services.skills.input_models import NodeHealthInput
 from connectors.ssh import SSHConnector, SSHExecutionError, SSHResult
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
 
-METRICS_SCRIPT = (
-    "python3 -c '"
-    "import json,os;"
-    "f=open(\"/proc/meminfo\");"
-    "lines=f.readlines();f.close();"
-    "mem_total=int(lines[0].split()[1]);"
-    "mem_avail=int(lines[2].split()[1]);"
-    "mem_pct=round((1-mem_avail/mem_total)*100,1);"
-    "f=open(\"/proc/loadavg\");"
-    "load1=float(f.read().split()[0]);f.close();"
-    "st=os.statvfs(\"/\");"
-    "disk_pct=round((1-st.f_bavail/st.f_blocks)*100,1);"
-    "f=open(\"/proc/stat\");"
-    "parts=f.readline().split();f.close();"
-    "idle=int(parts[4]);"
-    "total=sum(int(p) for p in parts[1:]);"
-    "cpu_pct=round((1-idle/total)*100,1);"
-    "print(json.dumps({\"mem_pct\":mem_pct,\"cpu_pct\":cpu_pct,\"load1\":load1,\"disk_pct\":disk_pct}))"
-    "'"
-)
+from services.metrics_script import METRICS_SCRIPT
 
 # Giới hạn an toàn cho log_lines để tránh ai đó truyền số khổng lồ làm tràn context
 MAX_LOG_LINES = 1000
@@ -35,6 +19,7 @@ DANGEROUS_ACTIONS = {"restart_docker", "restart_service"}
 
 
 class NodeHealthRemediateSkill(BaseSkill):
+    input_model = NodeHealthInput
     @property
     def name(self) -> str:
         return "node_health_remediate"
@@ -88,6 +73,8 @@ class NodeHealthRemediateSkill(BaseSkill):
         }
 
     def _ssh_exec(self, host: str, command: str) -> SSHResult:
+        if not target_allowed(host):
+            raise SSHExecutionError("SSH target denied by policy", code="policy_denied")
         return SSHConnector(settings).execute(host, command)
 
     def _get_metrics(self, host: str) -> dict:
@@ -103,6 +90,7 @@ class NodeHealthRemediateSkill(BaseSkill):
         try:
             result = self._ssh_exec(host, command)
             exit_code, stdout_text, stderr_text = result
+            verification = self._verify_command(host, command) if exit_code == 0 else {"status": "not_run", "reason": "Command failed"}
             return {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "host": host,
@@ -115,6 +103,7 @@ class NodeHealthRemediateSkill(BaseSkill):
                 "stdout_truncated": getattr(result, "stdout_truncated", False),
                 "stderr_truncated": getattr(result, "stderr_truncated", False),
                 "execution_status": "succeeded" if exit_code == 0 else "failed",
+                "verification": verification,
             }
         except SSHExecutionError as e:
             return {
@@ -143,6 +132,27 @@ class NodeHealthRemediateSkill(BaseSkill):
                 "stderr": f"Error executing approved command: {e}",
                 "execution_status": "unknown",
             }
+
+    def _verify_command(self, host, command):
+        parts = shlex.split(command)
+        if parts[:2] == ["docker", "restart"] and len(parts) == 3:
+            probe = "docker inspect --format '{{.State.Running}}' " + shlex.quote(parts[2])
+            expected = "true"
+        elif command == "sudo -n systemctl restart docker":
+            probe, expected = "systemctl is-active docker", "active"
+        else:
+            return {"status": "not_requested"}
+        try:
+            for attempt in range(3):
+                if attempt:
+                    time.sleep(0.5)
+                result = self._ssh_exec(host, probe)
+                code, output, _ = result
+                if code == 0 and output.strip().lower() == expected and not getattr(result, "stdout_truncated", False):
+                    return {"status": "recovered", "observed_at": datetime.now(timezone.utc).isoformat(), "probe": probe}
+            return {"status": "not_recovered", "observed_at": datetime.now(timezone.utc).isoformat(), "probe": probe}
+        except Exception:
+            return {"status": "inconclusive", "reason": "Post-check unavailable; reconcile service state"}
 
     async def execute(
         self,
@@ -237,7 +247,11 @@ class NodeHealthRemediateSkill(BaseSkill):
         }
 
         if command and not dry_run and action in DANGEROUS_ACTIONS:
+            from services.skill_catalog import builtin_manifest
+            manifest = builtin_manifest(NodeHealthRemediateSkill())
             approval_metadata = {
+                "skill_version": manifest["version"],
+                "skill_hash": manifest["content_hash"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "host": host,
                 "service": service,
@@ -248,6 +262,8 @@ class NodeHealthRemediateSkill(BaseSkill):
                 "evaluation": evaluation,
                 "reason": "Dangerous remediation requires human approval before execution.",
             }
+            if not approved_snapshot(approval_metadata):
+                return SkillResult(status=SkillStatus.BUSINESS_ERROR, data={"error_code": "POLICY_DENIED"}, error="Remediation is outside the configured allowlist")
             return SkillResult(
                 status=SkillStatus.SUCCESS,
                 data={

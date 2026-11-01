@@ -279,6 +279,12 @@ class SSHConnectorTest(unittest.TestCase):
 
 
 class NodeHealthSSHTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Explicitly scoped test deployment; production defaults deny writes.
+        from core.config import settings
+        self.enterContext(patch.object(settings, "ssh_allowed_hosts", "test-node,NOC-APP-01"))
+        self.enterContext(patch.object(settings, "ssh_allowed_services", "test-service,noc-api"))
+
     async def _assert_nonblocking(self, block_metrics):
         skill = NodeHealthRemediateSkill()
         loop = asyncio.get_running_loop()

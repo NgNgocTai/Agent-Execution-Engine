@@ -1,4 +1,5 @@
 import logging
+import threading
 from datetime import datetime, timedelta
 
 import clickhouse_connect
@@ -10,12 +11,15 @@ logger = logging.getLogger(__name__)
 
 class AlarmRepository:
     def __init__(self) -> None:
+        self._query_lock = threading.Lock()
         self.client = clickhouse_connect.get_client(
             host=settings.clickhouse_host,
             port=settings.clickhouse_port,
             username=settings.clickhouse_user,
             password=settings.clickhouse_password,
             database=settings.clickhouse_database,
+            connect_timeout=5,
+            send_receive_timeout=10,
         )
 
     def get_alarms(self, error_code: str, window_min: int = 10, limit: int = 50) -> tuple[list[dict], int]:
@@ -37,12 +41,12 @@ class AlarmRepository:
             LIMIT %(limit)s
         """
         try:
-            total_count = self.client.query(count_query, parameters={
+            total_count = self._query(count_query, parameters={
                 "code": error_code,
                 "since": since,
             }).result_rows[0][0]
 
-            result = self.client.query(query, parameters={
+            result = self._query(query, parameters={
                 "code": error_code,
                 "since": since,
                 "limit": limit,
@@ -64,16 +68,16 @@ class AlarmRepository:
             return alarms, total_count
         except Exception as e:
             logger.error("ClickHouse query error: %s", e)
-            return [], 0
+            raise RuntimeError("Alarm data source unavailable") from e
 
     def count_alarms(self, where_clause: str, params: dict) -> int:
         query = f"SELECT count(*) FROM alarm WHERE {where_clause}"
         try:
-            result = self.client.query(query, parameters=params)
+            result = self._query(query, parameters=params)
             return result.result_rows[0][0]
         except Exception as e:
             logger.error("ClickHouse count error: %s", e)
-            return 0
+            raise RuntimeError("Alarm data source unavailable") from e
 
     def group_alarms(
         self, group_col: str, where_clause: str, params: dict, limit: int = 0
@@ -82,11 +86,11 @@ class AlarmRepository:
         if limit > 0:
             query += f" LIMIT {limit}"
         try:
-            result = self.client.query(query, parameters=params)
+            result = self._query(query, parameters=params)
             return [{"key": row[0], "count": row[1]} for row in result.result_rows]
         except Exception as e:
             logger.error("ClickHouse group error: %s", e)
-            return []
+            raise RuntimeError("Alarm data source unavailable") from e
 
     def get_active_alarms_by_device(self, device_id: str, limit: int = 20) -> list[dict]:
         query = """
@@ -97,7 +101,7 @@ class AlarmRepository:
             LIMIT %(limit)s
         """
         try:
-            result = self.client.query(
+            result = self._query(
                 query, parameters={"device_id": device_id, "limit": limit}
             )
             return [
@@ -112,7 +116,16 @@ class AlarmRepository:
             ]
         except Exception as e:
             logger.error("ClickHouse active alarms error: %s", e)
-            return []
+            raise RuntimeError("Alarm data source unavailable") from e
+
+    def _query(self, *args, **kwargs):
+        # A ClickHouse HTTP session must not have concurrent queries.
+        if not self._query_lock.acquire(timeout=10):
+            raise TimeoutError("Alarm data source busy")
+        try:
+            return self.client.query(*args, **kwargs)
+        finally:
+            self._query_lock.release()
 
     def close(self) -> None:
         self.client.close()

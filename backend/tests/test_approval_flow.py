@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
@@ -40,7 +40,7 @@ class FakeApprovalRepo:
 
 class FakeSessionContext:
     async def __aenter__(self):
-        return object()
+        return SimpleNamespace(add=lambda record: None, flush=AsyncMock(), commit=AsyncMock(), scalar=AsyncMock(return_value=None))
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
@@ -139,6 +139,12 @@ class FakeNodeHealthRemediateSkillForApproval:
 
 
 class ApprovalFlowTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Explicitly scoped test deployment; production defaults deny writes.
+        from core.config import settings
+        self.enterContext(patch.object(settings, "ssh_allowed_hosts", "test-node,NOC-APP-01"))
+        self.enterContext(patch.object(settings, "ssh_allowed_services", "test-service,noc-api"))
+
     async def _collect_sse(self, response):
         chunks = []
         async for chunk in response.body_iterator:

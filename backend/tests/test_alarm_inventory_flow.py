@@ -116,7 +116,8 @@ class TwoSkillExecutionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.data["by_severity"]["Critical"], 2)
         self.assertEqual(result.data["by_error_code"][0]["name"], "Link Down")
         self.assertEqual(result.data["top_devices"][0]["name"], "NOC-APP-01")
-        self.assertIn("error_code IN ('ERR-001')", alarm_repo.count_calls[0][0])
+        self.assertIn("error_code IN %(domain_codes)s", alarm_repo.count_calls[0][0])
+        self.assertEqual(alarm_repo.count_calls[0][1]["domain_codes"], ("ERR-001",))
 
     async def test_direct_device_inventory_lookup_execution_matches_skill_md_shape(self):
         registry, _ = build_registry()
@@ -140,7 +141,7 @@ class TwoSkillExecutionTest(unittest.IsolatedAsyncioTestCase):
         result = await executor.execute("device_inventory_lookup", {})
 
         self.assertEqual(result.status, SkillStatus.BUSINESS_ERROR)
-        self.assertIn("Cần ít nhất 1", result.error)
+        self.assertEqual(result.data["error_code"], "INVALID_TOOL_INPUT")
 
     async def test_agent_loop_executes_both_tools_when_provider_requests_them(self):
         registry, _ = build_registry()

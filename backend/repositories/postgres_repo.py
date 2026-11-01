@@ -20,8 +20,17 @@ class DeviceRepository:
 
     async def connect(self) -> None:
         self._pool = await asyncpg.create_pool(
-            min_size=1, max_size=5, **self.conn_kwargs
+            min_size=1, max_size=5, timeout=5, command_timeout=10, **self.conn_kwargs
         )
+
+    async def find_device_candidates(self, *, device_name="", ip_address="", device_id=""):
+        column, value = ("d.device_id", device_id) if device_id else ("d.ip_address", ip_address) if ip_address else ("d.name", device_name)
+        rows = await self._pool.fetch(
+            "SELECT d.device_id, d.name, d.device_type, d.ip_address, v.name as vendor_name, s.name as station_name "
+            "FROM device d JOIN vendor v ON d.vendor_id = v.vendor_id JOIN station s ON d.station_id = s.station_id "
+            f"WHERE {column} = $1 ORDER BY d.device_id LIMIT 21", value,
+        )
+        return [dict(row) for row in rows]
 
     async def get_error_by_name(self, error_name: str) -> dict | None:
         row = await self._pool.fetchrow(

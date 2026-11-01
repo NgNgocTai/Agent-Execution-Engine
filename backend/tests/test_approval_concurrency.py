@@ -29,6 +29,12 @@ SUCCESS = {"executed": True, "command_succeeded": True, "exit_code": 0, "stdout"
 
 
 class ApprovalConcurrencyTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Explicitly scoped test deployment; production defaults deny writes.
+        from core.config import settings
+        self.enterContext(patch.object(settings, "ssh_allowed_hosts", "test-node,NOC-APP-01"))
+        self.enterContext(patch.object(settings, "ssh_allowed_services", "test-service,noc-api"))
+
     use_postgres = False
 
     async def asyncSetUp(self):
@@ -80,6 +86,7 @@ class ApprovalConcurrencyTest(unittest.IsolatedAsyncioTestCase):
                     "host": "test-node",
                     "command": "docker restart test-service",
                     "action": "restart_service",
+                    "service": "test-service",
                 },
                 expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=5),
             )

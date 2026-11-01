@@ -1,7 +1,9 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
+from services.skills.input_models import AlarmStatisticsInput
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,7 @@ GROUP_BY_COLUMNS = {
 
 
 class AlarmStatisticsSkill(BaseSkill):
+    input_model = AlarmStatisticsInput
     def __init__(self, alarm_repo, device_repo) -> None:
         self.alarm_repo = alarm_repo
         self.device_repo = device_repo
@@ -107,20 +110,20 @@ class AlarmStatisticsSkill(BaseSkill):
                         data=None,
                         error=f"Không tìm thấy error code nào thuộc domain '{domain}'",
                     )
-                placeholders = ", ".join(f"'{c}'" for c in error_codes)
-                where_clause += f" AND error_code IN ({placeholders})"
+                params["domain_codes"] = tuple(error_codes)
+                where_clause += " AND error_code IN %(domain_codes)s"
 
             # Query 1: Total count
-            total = self.alarm_repo.count_alarms(where_clause, params)
+            total = await asyncio.to_thread(self.alarm_repo.count_alarms, where_clause, params)
 
             # Query 2: By severity
-            by_severity_raw = self.alarm_repo.group_alarms(
+            by_severity_raw = await asyncio.to_thread(self.alarm_repo.group_alarms,
                 "severity", where_clause, params
             )
             by_severity = {item["key"]: item["count"] for item in by_severity_raw}
 
             # Query 3: By error_code (top N)
-            by_error_code_raw = self.alarm_repo.group_alarms(
+            by_error_code_raw = await asyncio.to_thread(self.alarm_repo.group_alarms,
                 "error_code", where_clause, params, limit=top_n
             )
 
@@ -139,7 +142,7 @@ class AlarmStatisticsSkill(BaseSkill):
                 )
 
             # Query 4: Top devices
-            top_devices_raw = self.alarm_repo.group_alarms(
+            top_devices_raw = await asyncio.to_thread(self.alarm_repo.group_alarms,
                 "device_id", where_clause, params, limit=top_n
             )
 
@@ -158,12 +161,12 @@ class AlarmStatisticsSkill(BaseSkill):
                 )
 
             # Query 5: Active vs archived
-            active_count = self.alarm_repo.count_alarms(
+            active_count = await asyncio.to_thread(self.alarm_repo.count_alarms,
                 where_clause + " AND status = 'active'", params
             )
             archived_count = total - active_count
 
-            grouped_alarms = self.alarm_repo.group_alarms(
+            grouped_alarms = await asyncio.to_thread(self.alarm_repo.group_alarms,
                 group_col, where_clause, params, limit=top_n
             )
 

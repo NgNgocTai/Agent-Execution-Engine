@@ -40,7 +40,7 @@
     "tool_name": "device_inventory_lookup",
     "arguments": {},
     "expected_status": "business_error",
-    "expected_error_contains": "Cần ít nhất 1"
+    "expected_error_contains": "Invalid tool input"
   },
   {
     "name": "noc alarm enrichment enriches signal loss",

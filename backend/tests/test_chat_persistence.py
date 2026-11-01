@@ -59,11 +59,18 @@ class FakeExecutor:
                 "host": "test-node",
                 "action": "restart_service",
                 "command": "docker restart test-service",
+                "service": "test-service",
             } if self.needs_approval else None,
         )
 
 
 class ChatPersistenceTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Explicitly scoped test deployment; production defaults deny writes.
+        from core.config import settings
+        self.enterContext(patch.object(settings, "ssh_allowed_hosts", "test-node,NOC-APP-01"))
+        self.enterContext(patch.object(settings, "ssh_allowed_services", "test-service,noc-api"))
+
     """Exercise real engine/controller persistence against an isolated SQLite DB."""
 
     async def asyncSetUp(self):
@@ -247,6 +254,7 @@ class ChatPersistenceTest(unittest.IsolatedAsyncioTestCase):
                             "host": "test-node",
                             "action": "restart_service",
                             "command": "docker restart test-service",
+                            "service": "test-service",
                         },
                         expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=5),
                     )
