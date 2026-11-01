@@ -17,6 +17,7 @@ class SkillVersion(Base):
     uploaded_by: Mapped[str] = mapped_column(String(255))
     reviewed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    validation_report: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     __table_args__ = (
         UniqueConstraint("name", "version", name="uq_skill_name_version"),

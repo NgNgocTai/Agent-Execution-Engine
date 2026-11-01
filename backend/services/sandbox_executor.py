@@ -182,7 +182,7 @@ async def execute_sandbox(manifest, files, arguments):
             if code != 0:
                 raise SandboxUnavailable("Sandbox artifact preparation failed")
             code, _, _ = await docker_command(
-                ["cp", "-", staging + ":/skill"], artifact_tar(files)
+                ["cp", "-", staging + ":/skill"], artifact_tar({**files, "args.json": json.dumps(arguments, ensure_ascii=False)})
             )
             if code != 0:
                 raise SandboxUnavailable("Sandbox artifact transfer failed")
@@ -199,11 +199,8 @@ async def execute_sandbox(manifest, files, arguments):
             )
             if code != 0 or truncated or stderr_truncated:
                 raise ValueError("Sandbox failed or exceeded its output limit")
-            result = SkillResult.model_validate_json(stdout)
-            if result.needs_approval or result.approval_metadata:
-                raise ValueError(
-                    "Transformation scripts cannot request privileged execution"
-                )
+            from services.skill_pipeline import normalize_output
+            result = normalize_output(stdout, manifest.output_contract)
             return result
     except FileNotFoundError as exc:
         raise SandboxUnavailable(

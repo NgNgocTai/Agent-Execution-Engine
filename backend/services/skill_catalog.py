@@ -8,8 +8,9 @@ from sqlalchemy import select
 from repositories.skill_models import SkillVersion, SkillActivation
 from services.skills.base import BaseSkill
 from services.skills.registry import SkillRegistry
-from services.skill_validation import inspect_archive
+from services.skill_validation import inspect_archive, Manifest
 from services.sandbox_executor import execute_sandbox
+from services.skill_pipeline import manifest_hash
 
 
 def builtin_manifest(skill):
@@ -61,6 +62,9 @@ def builtin_manifest(skill):
 
 
 def public_version(record):
+    from services.skill_pipeline import report_hash
+
+    report = json.loads(record.validation_report) if record.validation_report else None
     return {
         "id": record.id,
         "name": record.name,
@@ -71,29 +75,86 @@ def public_version(record):
         "uploaded_by": record.uploaded_by,
         "reviewed_by": record.reviewed_by,
         "review_notes": record.review_notes,
+        "validation_report": report,
+        "report_hash": report_hash(report) if report else None,
         "created_at": record.created_at.isoformat(),
     }
 
 
+def resolved_manifest(record):
+    from services.skill_pipeline import manifest_hash, POLICY_VERSION
+
+    original, files, digest = inspect_archive(base64.b64decode(record.archive))
+    manifest = Manifest.model_validate_json(record.manifest)
+    if digest != record.content_hash or (
+        manifest.name,
+        manifest.version,
+        manifest.instructions,
+    ) != (original.name, original.version, original.instructions):
+        raise ValueError("Skill content or identity changed")
+    if {spec.entrypoint for spec in manifest.run_specs()} != {
+        spec.entrypoint for spec in original.run_specs()
+    }:
+        raise ValueError("Resolved run-spec refers to undeclared scripts")
+    for spec in manifest.run_specs():
+        spec.input_model().model_validate(spec.sample_input)
+    if record.validation_report:
+        report = json.loads(record.validation_report)
+        if (
+            report.get("manifest_hash") != manifest_hash(manifest)
+            or report.get("policy_version") != POLICY_VERSION
+        ):
+            raise ValueError("Run-spec does not match its validation report")
+    return manifest, files
+
+
 class ScriptSkill(BaseSkill):
-    def __init__(self, record, sessions):
+    def __init__(self, record, sessions, script_path=None):
         self.version_id, self.digest, self.sessions = (
             record.id,
             record.content_hash,
             sessions,
         )
-        self.manifest, _, digest = inspect_archive(base64.b64decode(record.archive))
-        if digest != self.digest:
-            raise ValueError("Skill content hash changed")
+        self.manifest, _ = resolved_manifest(record)
+        from services.skill_pipeline import manifest_hash
+
+        self.spec_digest = manifest_hash(self.manifest)
+        self.script_path = script_path
+        specs = self.manifest.run_specs()
+        if script_path is None and len(specs) == 1:
+            script_path = specs[0].entrypoint
+            self.script_path = script_path
+        self.tool_name = self.manifest.name
+        if len(specs) > 1:
+            if script_path is None:
+                raise ValueError("Select a script from this multi-script package")
+            self.tool_name += (
+                "__" + hashlib.sha256(script_path.encode()).hexdigest()[:8]
+            )
+        if script_path:
+            spec = next(
+                (spec for spec in specs if spec.entrypoint == script_path), None
+            )
+            if spec is None:
+                raise ValueError("Script is not part of the reviewed package")
+            self.manifest = Manifest.model_validate(
+                {**self.manifest.model_dump(), **spec.model_dump(), "scripts": []}
+            )
         self.input_model = self.manifest.input_model()
 
     @property
     def name(self):
-        return self.manifest.name
+        return self.tool_name
 
     @property
     def description(self):
-        return self.manifest.description
+        return (
+            self.manifest.description
+            + " "
+            + self.manifest.purpose
+            + " "
+            + self.manifest.instructions
+        )[:3000]
 
     @property
     def parameters_schema(self):
@@ -108,10 +169,18 @@ class ScriptSkill(BaseSkill):
                 or record.content_hash != self.digest
             ):
                 raise ValueError("Pinned skill version was revoked or changed")
-            manifest, files, digest = inspect_archive(base64.b64decode(record.archive))
-        if digest != self.digest:
-            raise ValueError("Skill archive no longer matches its review")
-        return await execute_sandbox(manifest, files, arguments)
+            manifest, files = resolved_manifest(record)
+        from services.skill_pipeline import manifest_hash
+
+        if manifest_hash(manifest) != self.spec_digest:
+            raise ValueError("Reviewed run-spec changed since this run selected it")
+        if not manifest.run_specs():
+            from services.skills.base import SkillResult, SkillStatus
+
+            return SkillResult(
+                status=SkillStatus.SUCCESS, data={"instructions": manifest.instructions}
+            )
+        return await execute_sandbox(self.manifest, files, arguments)
 
 
 async def registry_for_run(base, session, sessions, run):
@@ -147,6 +216,9 @@ async def registry_for_run(base, session, sessions, run):
                 "kind": "script",
                 "id": record.id,
                 "hash": record.content_hash,
+                "spec_hash": manifest_hash(
+                    Manifest.model_validate_json(record.manifest)
+                ),
             }
         run.selected_skill_versions = json.dumps(pins)
         await session.flush()
@@ -164,5 +236,10 @@ async def registry_for_run(base, session, sessions, run):
                 or record.content_hash != pin["hash"]
             ):
                 raise ValueError("Pinned skill version is no longer available")
-            registry.register(ScriptSkill(record, sessions))
+            manifest, _ = resolved_manifest(record)
+            if pin.get("spec_hash") and pin["spec_hash"] != manifest_hash(manifest):
+                raise ValueError("Pinned skill run-spec changed")
+            specs = manifest.run_specs()
+            for path in [spec.entrypoint for spec in specs] or [None]:
+                registry.register(ScriptSkill(record, sessions, path))
     return registry

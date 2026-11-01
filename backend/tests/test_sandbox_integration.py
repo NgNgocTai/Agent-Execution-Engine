@@ -15,13 +15,31 @@ from test_skill_safety import archive, MANIFEST
 
 @unittest.skipUnless(os.environ.get("SANDBOX_TEST_IMAGE"), "Reviewed local sandbox image is not configured")
 class SandboxIntegrationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_markdown_scripts_receive_readonly_args_json_and_typed_outputs(self):
+        from test_skill_pipeline import markdown_package
+        from services.skill_pipeline import analyze
+        runtime = {"scripts": [{"entrypoint": "scripts/one.py", "output_contract": "json", "input_fields": [{"name": "text", "kind": "string"}], "sample_input": {"text": "alarm"}},
+                               {"entrypoint": "scripts/two.py", "output_contract": "text"}]}
+        payload = markdown_package({"runtime.json": json.dumps(runtime),
+            "scripts/one.py": "import json\nwith open('args.json') as f:\n print(json.dumps({'received':json.load(f)['text']}))\n",
+            "scripts/two.py": "print('alarm summary ready')\n"})
+        manifest, files, digest = inspect_archive(payload)
+        with patch.object(settings, "sandbox_image", os.environ["SANDBOX_TEST_IMAGE"]):
+            _, report = await analyze(manifest, files, digest, runner=execute_sandbox)
+        self.assertTrue(report["ready_for_review"])
+        self.assertEqual(report["scripts"][0]["result"]["data"], {"received": "alarm"})
+        self.assertEqual(report["scripts"][1]["result"]["data"].strip(), "alarm summary ready")
+
     async def test_real_sandbox_is_nonroot_readonly_and_does_not_receive_host_secrets(self):
         code = '''import json, sys
 os = sys.modules['os']
 arguments = json.load(sys.stdin)
 print(json.dumps({'status':'success','data':{'text':arguments['text'].upper(), 'uid':os.getuid(), 'root_writable':os.access('/',os.W_OK), 'host_secret':os.environ.get('SANDBOX_HOST_TEST_SECRET'), 'docker_socket':os.path.exists('/var/run/docker.sock'), 'network_interfaces':os.listdir('/sys/class/net')}}))
 '''
-        manifest, files, _ = inspect_archive(archive(code=code))
+        # Deliberately bypass the AST gate here to test the actual Docker
+        # isolation boundary even when a static analyzer misses hostile code.
+        manifest, files, _ = inspect_archive(archive())
+        files[manifest.entrypoint] = code
         with patch.object(settings, "sandbox_image", os.environ["SANDBOX_TEST_IMAGE"]), patch.dict(os.environ, {"SANDBOX_HOST_TEST_SECRET": "host-only-sentinel"}):
             result = await execute_sandbox(manifest, files, {"text": "hello"})
         self.assertEqual(result.data, {"text": "HELLO", "uid": 65532, "root_writable": False, "host_secret": None, "docker_socket": False, "network_interfaces": ["lo"]})

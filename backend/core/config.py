@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     worker_mode: Literal["embedded", "external"] = "embedded"
     data_mode: Literal["live", "fixture"] = "live"
     sandbox_image: str = ""
+    skill_validation_timeout_seconds: float = Field(default=120, ge=5, le=300)
     builtin_skills_directory: str = ""
     max_active_runs_per_actor: int = Field(default=4, ge=1, le=100)
     fixture_delay_seconds: float = Field(default=0, ge=0, le=10)
