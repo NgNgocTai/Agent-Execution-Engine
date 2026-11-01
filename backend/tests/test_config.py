@@ -1,3 +1,6 @@
+import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -37,6 +40,19 @@ class SettingsTest(unittest.TestCase):
 
     def test_unknown_ssh_hosts_are_not_automatically_trusted_by_default(self):
         self.assertIs(Settings.model_fields["ssh_auto_add_host_keys"].default, False)
+
+    def test_dotenv_path_can_be_overridden_for_offline_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dotenv = Path(directory, "checks.env")
+            dotenv.write_text("OPENAI_MODEL=offline-fixture\n", encoding="utf-8")
+            environment = {**os.environ, "NOC_AGENT_ENV_FILE": str(dotenv)}
+            environment.pop("OPENAI_MODEL", None)
+            process = subprocess.run(
+                [sys.executable, "-X", "utf8", "-c", "import json; from core.config import settings; print(json.dumps(settings.openai_model))"],
+                cwd=BACKEND_DIR, env=environment, capture_output=True, text=True, timeout=10,
+            )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(json.loads(process.stdout), "offline-fixture")
 
 
 if __name__ == "__main__":

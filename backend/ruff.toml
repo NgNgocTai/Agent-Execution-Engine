@@ -1,0 +1,5 @@
+target-version = "py312"
+
+[lint]
+# Start with syntax and correctness errors; broader cleanup is a separate change.
+select = ["E9", "F63", "F7", "F82"]

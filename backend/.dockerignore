@@ -4,4 +4,7 @@ __pycache__
 .env
 .env.*
 *.db
+*.dump
+evals/results
 .git
+.ruff_cache
