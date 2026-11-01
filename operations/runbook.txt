@@ -1,0 +1,178 @@
+NOC Agent upgrade operations
+============================
+
+Local checks
+------------
+scripts\check_all.bat
+scripts\check_all.bat -IncludeBrowser
+scripts\check_browser.ps1
+scripts\smoke_upgrade.ps1
+
+The main checks run without production dotenv, provider credentials or a live
+NOC node. PostgreSQL integration requires APPROVAL_TEST_POSTGRES_URL pointing to
+localhost/noc_agent_approval_test; tests use isolated UUID schemas. Actual
+sandbox tests require SANDBOX_TEST_IMAGE set to a pre-pulled reviewed digest.
+Reports/logs are written under .check-results (ignored by Git).
+
+Development stack
+-----------------
+docker compose --env-file .env.example up --build --detach
+Open http://localhost:8080. The root Compose file defaults to DATA_MODE=fixture,
+an external worker and a dedicated PostgreSQL control database. The mock UI
+does not represent live network state. Ports bind to localhost. The old
+backend/docker-compose.yml is retained for compatibility; prefer root compose.yml.
+
+Production prerequisites
+------------------------
+Provide a private runtime env file and run Compose with an explicit --env-file.
+Set DEPLOYMENT_MODE=production, DATA_MODE=live, WORKER_MODE=external,
+AUTH_MODE=bearer, explicit CORS origins and a PostgreSQL+asyncpg DATABASE_URL.
+The root Compose DSN uses CONTROL_DATABASE_*; set a private non-demo password.
+Set NOC_RUNTIME_ENV_FILE to the private runtime file. Configure inventory/alarm
+DSNs independently; they are not the control database. Terminate HTTPS at the
+organization ingress. No production deployment is performed by the check scripts.
+
+Generate opaque credentials locally with backend/scripts/create_principal.py.
+Store raw tokens privately, configure only principal digests/roles/scopes, and
+rotate by replacing the configured digest. Local mode is development-only.
+Subjects own conversations; admin can inspect all owners. A scoped principal
+can use SSH only on its host/service scope. Alarm/inventory aggregate tools are
+denied for restricted host scopes until a row-scoped data adapter is provided;
+hosts=["*"] explicitly grants aggregate-data access. Header-supplied identities
+and requested_by fields are never authorization sources. This is a bearer auth
+layer, not an organization SSO/JWKS integration.
+
+SSH/remediation
+---------------
+Verify fingerprints independently, mount known_hosts/key files read-only and
+configure SSH_KNOWN_HOSTS/SSH_KEY_PATH to container paths. Do not enable auto-add
+in production. Set exact SSH_ALLOWED_HOSTS and SSH_ALLOWED_SERVICES.
+ALLOW_DOCKER_RESTART is a separate opt-in. No allowlist means no remediation.
+Per-host guards serialize approvals across conversations and impose cooldown.
+Known exit status and post-check recovery are distinct. Closing SSH cannot
+retract a command that reached the node. Timeout, disconnect, lost worker or
+lost persistence may require reconciliation; do not retry the command manually
+until the remote outcome has been checked.
+
+Unknown execution
+-----------------
+Wait for the possible native dispatch window to close, inspect the node/service
+and record evidence. Reconciliation inside that window returns a retry delay.
+An admin can use the Run status
+panel to reconcile an unknown run. The backend records the observation and
+releases the run without rerunning or resuming its command. Cooldown still
+applies. For a legacy approval without a run, an admin can inspect
+GET /api/operations/approvals/{conversation_id}/{call_id} and record verified
+evidence with POST to the same path plus /reconcile. Do not edit status merely
+to enable retry. A dispatch deadline does not prove the remote command stopped;
+the operator must verify the remote outcome and any still-running process.
+
+Database release and legacy adoption
+-----------------------------------
+Stop writers before cutover. Take and verify a separate backup before adopting
+the legacy three-table schema. Do not run against the only copy of production.
+
+python backend/scripts/control_database.py backup-sqlite --source OLD.db --backup BACKUP.db
+python backend/scripts/control_database.py adopt-sqlite --source OLD.db --backup BACKUP.db --maintenance
+
+Production startup checks the Alembic revision; migrations run once as the
+Compose migrate service/release job. Development startup upgrades only a fresh
+or already versioned DB. Unversioned legacy DBs require explicit adoption.
+
+To copy the original three-table SQLite schema into an EMPTY PostgreSQL control
+database, set the destination DATABASE_URL and run:
+python backend/scripts/control_database.py cutover-postgres --source OLD.db --backup BACKUP.db --owner SUBJECT --maintenance
+
+The tool rejects nonempty destinations and sources containing run history;
+it does not silently discard new tables or merge two writers. IDs are preserved,
+pending approvals expire, uncertain approvals remain blocked, and sequences are
+reset. Review owner assignment and counts before switching DSNs. Keep the old
+backup unchanged. After new writes on PostgreSQL, rollback requires reconciling
+those writes; changing the DSN back is not a valid rollback by itself.
+
+PostgreSQL backup/restore
+------------------------
+Use pg_dump --format=custom and pg_restore into a separate empty database.
+Compare conversation/message/run/event/audit counts, sample Unicode history,
+foreign keys, and readiness. smoke_upgrade.ps1 performs this rehearsal only on
+its generated fixture project and removes its own containers/volume afterward.
+Production backup retention, encryption, storage and restore schedules belong
+to the deployment environment and are not configured by this repository.
+
+Workers, outages and cancellation
+--------------------------------
+Run python -m worker from backend. Workers claim jobs conditionally, heartbeat
+leases and fence stale owners before new dispatch and event/checkpoint commits.
+Expired running work is conservatively failed or marked unknown; it is never
+automatically retried as a write. Read retries can be initiated as a new run.
+The 30-second shutdown drain precedes cancellation; keep container stop grace
+above that. Database outages can leave a durable claim; recover/reconcile after
+the database returns. The runtime uses versioned JSON checkpoints in the control
+database, not LangGraph/PostgreSQLSaver. A changed built-in/catalog or unsupported
+checkpoint version blocks resumption. Explicit checkpoint migration remains an
+architecture task before broader workflow upgrades.
+
+Stop calls the cancel API. Switching conversations, closing a tab or reconnecting
+only detaches the stream. Operator interventions are accepted at approval
+checkpoints and apply after the current tool batch; they cannot alter the saved
+approval action. Rejected calls produce tool results and the remaining batch
+continues. Admission limits bound active runs per actor.
+
+Custom skill operations
+-----------------------
+Package the included example:
+python backend/scripts/package_skill.py skill_examples/custom_alarm_summary .check-results/custom_alarm_summary.zip
+
+Upload from Skills. A different skill reviewer must inspect source/manifest and
+submit review notes; a sandbox smoke test must pass. Admin activation selects
+an immutable name/version/hash. New runs select the active version, waiting
+runs retain their pins, and revoke blocks subsequent execution of that version.
+Custom skills currently support bounded scalar input fields and read-only
+transformations of supplied data. They do not receive database/SSH credentials,
+network access, arbitrary package installation or connector capabilities.
+
+Configure SANDBOX_IMAGE as a pre-pulled immutable Python image digest. Docker CLI
+is included in the runtime image. Use a dedicated sandbox daemon via authenticated
+TLS (DOCKER_HOST/DOCKER_TLS_VERIFY/DOCKER_CERT_PATH), with certificate mounts readable
+by UID 65532. Do not point this at a business/container orchestration daemon.
+No host Docker socket is required. Artifact transfer uses a UUID-named volume;
+the transfer container is never started, the execution volume is read-only, and
+both containers/volume are removed after the run. If the daemon becomes unavailable
+during cleanup, inspect only resources labeled noc.skill.sandbox=true, verify
+ownership/age before removal and investigate the broker outage. Never daemon-prune.
+Static scanning is a review aid; sandbox isolation is still required.
+
+Monitoring and release limits
+-----------------------------
+/health is liveness. /ready checks startup/drain, the control DB and embedded
+worker when applicable. /api/operations/metrics is admin-only and reports bounded
+status aggregates, queue age, expired leases and approval backlog. Request IDs
+are returned in X-Request-ID and included with run IDs in audit/telemetry context.
+Langfuse enqueue/update failures do not stop execution; network flush is moved
+off the per-turn critical path. Audit remains in the control database.
+
+The endpoint reports a bounded sample rather than fleet-wide billing statistics.
+The metrics endpoint samples the latest 1000 completed steps for mean/p95 latency
+and reported token usage; missing usage is marked incomplete. Run admission also
+enforces a configured token estimate. Optional LLM_RUN_COST_LIMIT requires an
+LLM_MODEL_PRICES_JSON entry for every candidate model, in LLM_BUDGET_CURRENCY,
+with a managed LLM_PRICE_CONFIG_VERSION. Estimates include configured retry and
+fallback bounds and survive approval checkpoints; unknown historical cost cannot
+be reset to zero when enabling a cost cap. These estimates are not billing data
+or a replacement for provider-side spending limits. No prices are hard-coded.
+
+Remaining environment-level work includes production latency certification,
+fleet topology correlation, organization SSO, automatic retention scheduling,
+holdout quality certification or a staging SLA. Configure those with the target
+environment and measured data; do not infer readiness from fixture pass counts.
+
+Retention preview: python backend/scripts/retention.py --days 30
+Apply only the reviewed policy by adding --apply. It deletes old terminal-run
+events/checkpoints while preserving messages, audit, idempotency records and
+uncertain work. Expired event cursors require a snapshot reload. Scheduling and
+backup retention are environment decisions; this job is not auto-enabled.
+
+Optional paid quality evaluation is a separate workflow_dispatch job. It requires
+the authorize_paid_calls checkbox and an explicitly configured online-evaluation
+environment/provider. Set provider-side spending limits before invoking it.
+Offline pull-request checks do not use this job or need API keys.

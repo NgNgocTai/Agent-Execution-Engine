@@ -25,7 +25,12 @@ function Set-CheckEnvironment {
     $names = @(
         'NOC_AGENT_ENV_FILE', 'DATABASE_URL', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
         'DEEPSEEK_API_KEY', 'OPENROUTER_API_KEY', 'RAGAS_EVAL_API_KEY',
-        'LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY'
+        'LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY', 'PYTHONUTF8',
+        'AUTH_MODE', 'AUTH_PRINCIPALS_JSON', 'DEPLOYMENT_MODE', 'DATA_MODE', 'WORKER_MODE',
+        'SSH_PASSWORD', 'SSH_USER', 'SSH_HOST', 'SSH_KEY_PATH', 'SSH_KNOWN_HOSTS',
+        'SSH_ALLOWED_HOSTS', 'SSH_ALLOWED_SERVICES', 'SSH_AUTO_ADD_HOST_KEYS',
+        'CLICKHOUSE_HOST', 'CLICKHOUSE_USER', 'CLICKHOUSE_PASSWORD',
+        'POSTGRES_HOST', 'POSTGRES_USER', 'POSTGRES_PASSWORD'
     )
     $previous = @{}
     foreach ($name in $names) {
@@ -34,6 +39,12 @@ function Set-CheckEnvironment {
     }
     $env:NOC_AGENT_ENV_FILE = if ($env:OS -eq 'Windows_NT') { 'NUL' } else { '/dev/null' }
     $env:DATABASE_URL = 'sqlite+aiosqlite:///:memory:'
+    $env:PYTHONUTF8 = '1'
+    $env:AUTH_MODE = 'local'
+    $env:AUTH_PRINCIPALS_JSON = '[]'
+    $env:DEPLOYMENT_MODE = 'development'
+    $env:DATA_MODE = 'live' # Unit fixtures inject repositories; never bootstrap live sources.
+    $env:WORKER_MODE = 'embedded'
     return $previous
 }
 

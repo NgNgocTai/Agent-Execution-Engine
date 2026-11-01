@@ -15,6 +15,10 @@ import json, os, sys
 kind, args = sys.argv[1], sys.argv[2:]
 if kind == "docker" and args[:1] in (["info"], ["version"]):
     stage = "docker-info"
+elif kind == "docker" and args[:1] == ["ps"]:
+    stage = "docker-ps"
+elif kind == "docker" and args[:1] == ["run"] and any("playwright" in arg for arg in args):
+    stage = "browser"
 elif kind == "docker" and args[:1] == ["build"]:
     stage = "docker-build"
 elif kind == "npm":
@@ -106,7 +110,7 @@ class CheckScriptsTest(unittest.TestCase):
         process, calls = self._run("scripts/check_all.ps1", relative=True)
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
         self.assertEqual([call["stage"] for call in calls], [
-            "lint", "unit", "contracts", "benchmark", "npm-ci", "npm-lint", "npm-typecheck", "npm-build",
+            "lint", "unit", "contracts", "benchmark", "npm-ci", "npm-lint", "npm-typecheck", "npm-test", "npm-build",
         ])
         self.assertIn("All checks passed", process.stdout)
 
@@ -128,7 +132,7 @@ class CheckScriptsTest(unittest.TestCase):
         self.assertNotIn("All checks passed", process.stdout)
 
     def test_each_frontend_failure_stops_remaining_checks(self):
-        stages = ["lint", "unit", "contracts", "benchmark", "npm-ci", "npm-lint", "npm-typecheck", "npm-build"]
+        stages = ["lint", "unit", "contracts", "benchmark", "npm-ci", "npm-lint", "npm-typecheck", "npm-test", "npm-build"]
         for stage in stages[4:]:
             with self.subTest(stage=stage):
                 process, calls = self._run("scripts/check_all.ps1", fail=stage)
@@ -195,6 +199,12 @@ try {
         process, calls = self._run("backend/scripts/refresh_real_snapshots.ps1", fail="snapshot", extra=("-ListConversations",))
         self.assertNotEqual(process.returncode, 0)
         self.assertEqual([call["stage"] for call in calls], ["snapshot"])
+
+    def test_browser_runner_propagates_failure_and_restores_its_cleanup_path(self):
+        process, calls = self._run("scripts/check_browser.ps1", fail="browser", extra=("-ReportDirectory", str(self.path / "browser reports")))
+        self.assertNotEqual(process.returncode, 0)
+        self.assertEqual([call["stage"] for call in calls], ["browser", "docker-ps"])
+        self.assertNotIn("Browser checks passed", process.stdout)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,8 @@ dist-ssr/
 *.tsbuildinfo
 .check-results/
 .ruff_cache/
+playwright-report/
+test-results/
 *.local
 
 # IDEs and Editors

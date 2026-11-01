@@ -1,0 +1,96 @@
+name: noc-agent
+
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+asyncpg://${CONTROL_DATABASE_USER:-noc}:${CONTROL_DATABASE_PASSWORD:-local-development-only}@db:5432/${CONTROL_DATABASE_NAME:-noc_agent_control}
+  NOC_AGENT_ENV_FILE: /dev/null
+  DATA_MODE: ${DATA_MODE:-fixture}
+  DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-development}
+  AUTH_MODE: ${AUTH_MODE:-local}
+  AUTH_PRINCIPALS_JSON: ${AUTH_PRINCIPALS_JSON:-[]}
+  WORKER_MODE: external
+  FIXTURE_DELAY_SECONDS: ${NOC_FIXTURE_DELAY_SECONDS:-0}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+  BUILTIN_SKILLS_DIRECTORY: /skill-docs
+  SSH_ALLOWED_HOSTS: ${SSH_ALLOWED_HOSTS:-}
+  SSH_ALLOWED_SERVICES: ${SSH_ALLOWED_SERVICES:-}
+  ALLOW_DOCKER_RESTART: ${ALLOW_DOCKER_RESTART:-false}
+
+services:
+  db:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    environment:
+      POSTGRES_DB: ${CONTROL_DATABASE_NAME:-noc_agent_control}
+      POSTGRES_USER: ${CONTROL_DATABASE_USER:-noc}
+      POSTGRES_PASSWORD: ${CONTROL_DATABASE_PASSWORD:-local-development-only}
+    volumes: [control_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build: {context: ./backend, target: runtime}
+    environment: *app-environment
+    command: [python, scripts/control_database.py, migrate]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: "no"
+
+  backend:
+    build: {context: ./backend, target: runtime}
+    environment: *app-environment
+    env_file:
+      - path: ${NOC_RUNTIME_ENV_FILE:-.env.example}
+        required: true
+    volumes: [./skills:/skill-docs:ro]
+    depends_on:
+      db: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  worker:
+    build: {context: ./backend, target: runtime}
+    environment: *app-environment
+    env_file:
+      - path: ${NOC_RUNTIME_ENV_FILE:-.env.example}
+        required: true
+    command: [python, -m, worker]
+    volumes: [./skills:/skill-docs:ro]
+    depends_on:
+      db: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports: ["127.0.0.1:${NOC_WEB_PORT:-8080}:8080"]
+    depends_on:
+      backend: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+volumes:
+  control_data:

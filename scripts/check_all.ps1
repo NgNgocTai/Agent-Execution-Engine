@@ -2,7 +2,8 @@ param(
     [ValidateSet('Docker', 'Local')][string]$Mode = 'Docker',
     [string]$PythonExecutable = 'python',
     [string]$NpmExecutable = 'npm',
-    [string]$ReportDirectory = ''
+    [string]$ReportDirectory = '',
+    [switch]$IncludeBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +25,7 @@ tar -C /work -xf /tmp/frontend.tar
 npm ci --no-audit --no-fund
 npm run lint
 npm run typecheck
+npm test
 npm run build
 '@
         Invoke-CheckedCommand -Label 'Frontend checks' -FilePath 'docker' -Arguments @(
@@ -36,13 +38,14 @@ npm run build
         Push-Location $frontendDir
         try {
             Invoke-CheckedCommand -Label 'Frontend install' -FilePath $NpmExecutable -Arguments @('ci', '--no-audit', '--no-fund')
-            foreach ($check in @('lint', 'typecheck', 'build')) {
+            foreach ($check in @('lint', 'typecheck', 'test', 'build')) {
                 Invoke-CheckedCommand -Label "Frontend $check" -FilePath $NpmExecutable -Arguments @('run', $check)
             }
         } finally {
             Pop-Location
         }
     }
+    if ($IncludeBrowser) { & (Join-Path $PSScriptRoot 'check_browser.ps1') }
     Write-Host 'All checks passed.'
 } finally {
     Restore-CheckEnvironment -Previous $previousEnvironment
