@@ -9,7 +9,11 @@ async function fixture(page: Page, approval = false, snapshotOnly = false) {
     const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/api/config") return json({ providers: ["mock"] });
     if (path === "/api/conversations") return json({ conversations: started ? [{ id: "conversation-one", title: "Fixture request", provider: "mock" }] : [] });
-    if (path.endsWith("/messages")) return json({ conversation_id: "conversation-one", provider: "mock", messages: [{ role: "user", content: "Fixture request" }], pending_approvals: [] });
+    if (path.endsWith("/messages")) {
+      // Configuration resolves first; it must not reset the conversation being restored.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return json({ conversation_id: "conversation-one", provider: "mock", messages: [{ role: "user", content: "Fixture request" }], pending_approvals: [] });
+    }
     if (path.endsWith("/runs") && path.includes("/conversations/")) return json({ runs: started ? [run()] : [] });
     if (path === "/api/runs" && route.request().method() === "POST") { started = true; return json(run(), 202); }
     if (path.endsWith("/approve")) { approvals++; approved = true; return json({ ...run(), status: "queued" }); }

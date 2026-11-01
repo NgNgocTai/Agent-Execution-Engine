@@ -9,7 +9,7 @@ import { useRunStream } from "./useRunStream";
 
 export function useChat() {
   const [history, setHistory] = useState<ChatMessage[]>([]);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(() => sessionStorage.getItem("noc-selected-conversation"));
   const [currentProvider, setCurrentProvider] = useState("openai");
   const [run, setRun] = useState<RunSummary | null>(null);
   const [epoch, setEpoch] = useState(0);

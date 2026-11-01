@@ -106,7 +106,7 @@ export default function ChatLayout() {
         const nextProviders = config.providers.map(toProviderOption);
         setIsAdmin(config.actor?.roles.includes("admin") || false);
         setProviders(nextProviders);
-        if (!config.providers.includes(currentProvider)) {
+        if (!conversationId && !isStreaming && !config.providers.includes(currentProvider)) {
           switchProvider(config.providers[0]);
         }
       })
@@ -117,7 +117,7 @@ export default function ChatLayout() {
     return () => {
       cancelled = true;
     };
-  }, [currentProvider, switchProvider]);
+  }, [currentProvider, switchProvider, conversationId, isStreaming]);
 
   useEffect(() => {
     const totalLen = messages.reduce(
