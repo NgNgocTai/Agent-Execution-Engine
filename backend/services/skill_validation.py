@@ -1,6 +1,5 @@
 """Quarantine-only archive validation. Never imports or executes uploaded code."""
 
-import ast
 import hashlib
 from io import BytesIO
 import json
@@ -11,6 +10,7 @@ import zipfile
 import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
+from services.skill_ast import analyze_python
 
 MAX_ARCHIVE = 2 * 1024 * 1024
 MAX_EXPANDED = 8 * 1024 * 1024
@@ -23,17 +23,14 @@ class InputField(BaseModel):
     required: bool = True
 
 
-class Manifest(BaseModel):
+class ScriptSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    name: str = Field(pattern=r"^custom_[a-z][a-z0-9_]{0,55}$")
-    version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$", max_length=40)
-    description: str = Field(min_length=10, max_length=1000)
     entrypoint: str = Field(min_length=1, max_length=150)
-    risk: Literal["read_only"] = "read_only"
-    network: Literal["none"] = "none"
-    input_fields: list[InputField] = Field(max_length=30)
-    sample_input: dict
+    purpose: str = Field(default="Transform supplied data", max_length=1000)
+    input_fields: list[InputField] = Field(default_factory=list, max_length=30)
+    sample_input: dict = Field(default_factory=dict)
     timeout_seconds: int = Field(default=10, ge=1, le=30)
+    output_contract: Literal["skill_result", "json", "text"] = "skill_result"
 
     def input_model(self):
         fields = {}
@@ -51,8 +48,65 @@ class Manifest(BaseModel):
                 )
             fields[field.name] = (kind, default)
         return create_model(
-            "SkillInput", __config__=ConfigDict(extra="forbid", strict=True), **fields
+            "SkillInput",
+            __config__=ConfigDict(extra="forbid", strict=True, allow_inf_nan=False),
+            **fields,
         )
+
+
+class Manifest(ScriptSpec):
+    name: str = Field(pattern=r"^custom_[a-z][a-z0-9_]{0,55}$")
+    version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$", max_length=40)
+    description: str = Field(min_length=10, max_length=1000)
+    entrypoint: str = Field(default="", max_length=150)
+    risk: Literal["read_only"] = "read_only"
+    network: Literal["none"] = "none"
+    instructions: str = Field(default="", max_length=32768)
+    package_format: Literal["manifest", "agent_skill"] = "manifest"
+    scripts: list[ScriptSpec] = Field(default_factory=list, max_length=20)
+
+    def run_specs(self):
+        if self.scripts:
+            return self.scripts
+        if not self.entrypoint:
+            return []
+        return [
+            ScriptSpec.model_validate(
+                {key: getattr(self, key) for key in ScriptSpec.model_fields}
+            )
+        ]
+
+
+class SkillValidationError(ValueError):
+    def __init__(self, report):
+        super().__init__("Skill package failed static validation")
+        self.report = report
+
+
+def validate_sources(files):
+    from core.redaction import redact
+
+    findings = []
+    for path, content in files.items():
+        if redact(content) != content:
+            findings.append(
+                {
+                    "path": path,
+                    "line": 1,
+                    "code": "POTENTIAL_SECRET",
+                    "message": "Potential credential in source",
+                }
+            )
+        if path.endswith(".py"):
+            findings.extend(analyze_python(content, path))
+    report = {
+        "stage": "static",
+        "status": "failed" if findings else "passed",
+        "findings": findings[:200],
+    }
+    if findings:
+        raise SkillValidationError(report)
+    return report
 
 
 def inspect_archive(payload):
@@ -91,7 +145,7 @@ def inspect_archive(payload):
                 raise ValueError("Archive contains case-colliding paths")
             names.add(info.filename.casefold())
             if (
-                path.suffix.lower() not in {".py", ".json", ".md", ".txt"}
+                path.suffix.lower() not in {".py", ".json", ".md", ".txt", ".csv"}
                 or info.filename in files
             ):
                 raise ValueError("Unsupported or duplicate archive entry")
@@ -104,47 +158,30 @@ def inspect_archive(payload):
                 raise ValueError("Archive expansion limit exceeded")
             content = archive.read(info).decode("utf-8")
             files[info.filename] = content
-    if "manifest.json" not in files:
-        raise ValueError("manifest.json is required")
-    manifest = Manifest.model_validate_json(files["manifest.json"])
-    if manifest.entrypoint not in files or not manifest.entrypoint.endswith(".py"):
-        raise ValueError("Declared Python entrypoint was not found")
-    manifest.input_model().model_validate(manifest.sample_input)
-    from core.redaction import redact
+    # A single wrapper directory is accepted without writing/extracting files.
+    if "manifest.json" not in files and "SKILL.md" not in files:
+        roots = {PurePosixPath(name).parts[0] for name in files}
+        if len(roots) == 1 and all(
+            len(PurePosixPath(name).parts) > 1 for name in files
+        ):
+            prefix = next(iter(roots)) + "/"
+            files = {name[len(prefix) :]: value for name, value in files.items()}
+    if "args.json" in files:
+        raise ValueError("args.json is reserved for runtime arguments")
+    if "manifest.json" in files:
+        manifest = Manifest.model_validate_json(files["manifest.json"])
+    else:
+        from services.skill_markdown import markdown_manifest
 
-    for path, content in files.items():
-        if redact(content) != content:
-            raise ValueError("Potential credential in uploaded source")
-        if path.endswith(".py"):
-            tree = ast.parse(content)
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.Import, ast.ImportFrom)):
-                    names = (
-                        [alias.name for alias in node.names]
-                        if isinstance(node, ast.Import)
-                        else [node.module or ""]
-                    )
-                    if any(
-                        name.split(".")[0]
-                        not in {
-                            "json",
-                            "sys",
-                            "math",
-                            "statistics",
-                            "datetime",
-                            "collections",
-                            "re",
-                        }
-                        for name in names
-                    ):
-                        raise ValueError(
-                            "Static review requires imports from the supported transformation modules only"
-                        )
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id
-                    in {"eval", "exec", "compile", "__import__", "open"}
-                ):
-                    raise ValueError("Static review rejected a restricted call")
+        manifest = markdown_manifest(files)
+    specs = manifest.run_specs()
+    if not specs and not manifest.instructions:
+        raise ValueError("A skill needs instructions or a declared entrypoint")
+    if len({spec.entrypoint for spec in specs}) != len(specs):
+        raise ValueError("Duplicate script entrypoint")
+    for spec in specs:
+        if spec.entrypoint not in files or not spec.entrypoint.endswith(".py"):
+            raise ValueError("Declared Python entrypoint was not found")
+        spec.input_model().model_validate(spec.sample_input)
+    validate_sources(files)
     return manifest, files, hashlib.sha256(payload).hexdigest()
