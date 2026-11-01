@@ -114,6 +114,11 @@ class LocalSSHServer:
                 channel.sendall(b"ok")
             channel.send_exit_status(7 if command == b"fail" else 0)
             channel.shutdown_write()
+            channel.close()
+            # Keep the transport alive until the client has drained the channel.
+            # Dropping TCP here races its final SSH window-adjust packets on Linux.
+            while transport.is_active() and not self.stop.wait(0.01):
+                pass
         except (EOFError, OSError, paramiko.SSHException):
             # Host-key rejection, cancellation and deadline tests close the peer.
             pass
