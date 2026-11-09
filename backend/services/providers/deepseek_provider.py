@@ -5,13 +5,10 @@ from typing import AsyncGenerator
 from openai import AsyncOpenAI
 
 from core.config import settings
-from core.schemas import NormalizedMessage, NormalizedResponse, NormalizedToolCall
+from core.schemas import NormalizedMessage, NormalizedResponse
 from services.providers.base import LLMProvider
 from services.providers.thinking import (
-    ThinkTagParser,
     format_provider_error,
-    get_reasoning_delta,
-    parse_tool_arguments,
 )
 from services.skills.base import ToolSchema
 
@@ -20,12 +17,14 @@ logger = logging.getLogger(__name__)
 
 class DeepSeekProvider(LLMProvider):
     def __init__(self) -> None:
+        from services.run_configuration import execution_settings
+        self._config = execution_settings().model_copy(deep=True)
         self.client = AsyncOpenAI(
             max_retries=0,
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
+            api_key=self.config.deepseek_api_key,
+            base_url=self.config.deepseek_base_url,
         )
-        self.model_name = settings.deepseek_model
+        self.model_name = self.config.deepseek_model
 
     def format_tools(self, tools: list[ToolSchema]) -> list[dict]:
         return [
@@ -104,65 +103,6 @@ class DeepSeekProvider(LLMProvider):
             )
             return
 
-        tool_call_buffers: dict[int, dict] = {}
-        think_parser = ThinkTagParser()
-
-        async for chunk in response:
-            if hasattr(chunk, "usage") and chunk.usage:
-                yield NormalizedResponse(token_usage={"input": chunk.usage.prompt_tokens, "output": chunk.usage.completion_tokens})
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta is None:
-                continue
-
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tool_call_buffers:
-                        tool_call_buffers[idx] = {"id": tc_delta.id or "", "name": "", "arguments_str": ""}
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            tool_call_buffers[idx]["name"] += tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
-
-            # OpenRouter trả thinking ở field "reasoning" riêng (không phải <think> tags)
-            reasoning = get_reasoning_delta(delta)
-            if reasoning:
-                yield NormalizedResponse(thinking_content=reasoning)
-                continue
-
-            if delta.content:
-                for kind, content in think_parser.feed(delta.content):
-                    if kind == "thinking":
-                        yield NormalizedResponse(thinking_content=content)
-                    else:
-                        yield NormalizedResponse(text_content=content, stop_reason="")
-
-            finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
-            if finish_reason == "tool_calls":
-                for kind, content in think_parser.flush():
-                    if kind == "thinking":
-                        yield NormalizedResponse(thinking_content=content)
-                    else:
-                        yield NormalizedResponse(text_content=content, stop_reason="")
-                yield NormalizedResponse(
-                    tool_calls=[
-                        NormalizedToolCall(
-                            call_id=buf["id"],
-                            tool_name=buf["name"].split("<")[0] if buf["name"] else "",
-                            arguments=parse_tool_arguments(
-                                buf["arguments_str"],
-                                buf["name"],
-                            ),
-                        )
-                        for buf in tool_call_buffers.values()
-                    ],
-                    stop_reason="tool_calls",
-                )
-            elif finish_reason == "stop":
-                for kind, content in think_parser.flush():
-                    if kind == "thinking":
-                        yield NormalizedResponse(thinking_content=content)
-                    else:
-                        yield NormalizedResponse(text_content=content, stop_reason="")
-                yield NormalizedResponse(stop_reason="end_turn")
+        from services.providers.completion import openai_chunks
+        async for item in openai_chunks(response):
+            yield item

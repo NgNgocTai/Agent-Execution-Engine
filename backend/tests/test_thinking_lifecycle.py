@@ -50,9 +50,10 @@ class ThinkingParserTest(unittest.TestCase):
             ],
         )
 
-    def test_malformed_tool_arguments_fall_back_to_empty_dict(self):
-        self.assertEqual(parse_tool_arguments("{bad json", "broken_tool"), {})
-        self.assertEqual(parse_tool_arguments("[1, 2]", "array_tool"), {})
+    def test_malformed_tool_arguments_are_rejected_before_dispatch(self):
+        for raw in ("{bad json", "[1, 2]", ""):
+            with self.assertRaises(ValueError):
+                parse_tool_arguments(raw, "broken_tool")
         self.assertEqual(parse_tool_arguments('{"ok": true}', "good_tool"), {"ok": True})
 
     def test_provider_rate_limit_error_is_human_readable(self):

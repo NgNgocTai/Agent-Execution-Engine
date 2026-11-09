@@ -3,13 +3,10 @@ import logging
 from typing import AsyncGenerator
 
 from core.config import settings
-from core.schemas import NormalizedMessage, NormalizedResponse, NormalizedToolCall
+from core.schemas import NormalizedMessage, NormalizedResponse
 from services.providers.base import LLMProvider
 from services.providers.thinking import (
-    ThinkTagParser,
     format_provider_error,
-    get_reasoning_delta,
-    parse_tool_arguments,
 )
 from services.skills.base import ToolSchema
 
@@ -18,19 +15,21 @@ logger = logging.getLogger(__name__)
 
 class AnthropicProvider(LLMProvider):
     def __init__(self) -> None:
-        self.model_name = settings.anthropic_model
-        self._use_openai_format = bool(settings.anthropic_base_url)
+        from services.run_configuration import execution_settings
+        self._config = execution_settings().model_copy(deep=True)
+        self.model_name = self.config.anthropic_model
+        self._use_openai_format = self.config.resolved_anthropic_protocol == "openai_compatible"
 
         if self._use_openai_format:
             from openai import AsyncOpenAI
             self.client = AsyncOpenAI(
                 max_retries=0,
-                api_key=settings.anthropic_api_key,
-                base_url=settings.anthropic_base_url,
+                api_key=self.config.anthropic_api_key,
+                base_url=self.config.anthropic_base_url,
             )
         else:
             from anthropic import AsyncAnthropic
-            self.client = AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
+            self.client = AsyncAnthropic(api_key=self.config.anthropic_api_key, base_url=self.config.anthropic_base_url or None, max_retries=0)
 
     def format_tools(self, tools: list[ToolSchema]) -> list[dict]:
         if self._use_openai_format:
@@ -89,6 +88,8 @@ class AnthropicProvider(LLMProvider):
     def _convert_to_anthropic_messages(self, messages: list[NormalizedMessage]) -> list[dict]:
         anthropic_msgs = []
         for msg in messages:
+            if msg.role == "system":
+                continue
             role = "assistant" if msg.role == "assistant" else "user"
             blocks = []
             if msg.role == "tool":
@@ -141,9 +142,9 @@ class AnthropicProvider(LLMProvider):
     ) -> AsyncGenerator[NormalizedResponse, None]:
         openai_messages = self._convert_to_openai_messages(messages)
         openai_tools = self.format_tools(tools) if tools else None
-        reasoning_max_tokens = max(settings.anthropic_reasoning_max_tokens, 0)
+        reasoning_max_tokens = max(self.config.anthropic_reasoning_max_tokens, 0)
         max_tokens = max(
-            settings.anthropic_max_tokens,
+            self.config.anthropic_max_tokens,
             reasoning_max_tokens + 1,
         )
         extra_body = (
@@ -182,132 +183,77 @@ class AnthropicProvider(LLMProvider):
             )
             return
 
-        tool_call_buffers: dict[int, dict] = {}
-        think_parser = ThinkTagParser()
-        async for chunk in response:
-            if hasattr(chunk, "usage") and chunk.usage:
-                yield NormalizedResponse(token_usage={"input": chunk.usage.prompt_tokens, "output": chunk.usage.completion_tokens})
+        from services.providers.completion import openai_chunks
+        async for item in openai_chunks(response):
+            yield item
 
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta is None:
-                continue
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tool_call_buffers:
-                        tool_call_buffers[idx] = {"id": tc_delta.id or "", "name": "", "arguments_str": ""}
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            tool_call_buffers[idx]["name"] += tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            tool_call_buffers[idx]["arguments_str"] += tc_delta.function.arguments
-            reasoning = get_reasoning_delta(delta)
-            if reasoning:
-                yield NormalizedResponse(thinking_content=reasoning)
-                continue
-            if delta.content:
-                for kind, content in think_parser.feed(delta.content):
-                    if kind == "thinking":
-                        yield NormalizedResponse(thinking_content=content)
-                    else:
-                        yield NormalizedResponse(text_content=content, stop_reason="")
-            finish_reason = chunk.choices[0].finish_reason if chunk.choices else None
-            if finish_reason == "tool_calls":
-                for kind, content in think_parser.flush():
-                    if kind == "thinking":
-                        yield NormalizedResponse(thinking_content=content)
-                    else:
-                        yield NormalizedResponse(text_content=content, stop_reason="")
-                yield NormalizedResponse(
-                    tool_calls=[
-                        NormalizedToolCall(
-                            call_id=buf["id"],
-                            tool_name=buf["name"].split("<")[0] if buf["name"] else "",
-                            arguments=parse_tool_arguments(
-                                buf["arguments_str"],
-                                buf["name"],
-                            ),
-                        )
-                        for buf in tool_call_buffers.values()
-                    ],
-                    stop_reason="tool_calls",
-                )
-            elif finish_reason == "stop":
-                for kind, content in think_parser.flush():
-                    if kind == "thinking":
-                        yield NormalizedResponse(thinking_content=content)
-                    else:
-                        yield NormalizedResponse(text_content=content, stop_reason="")
-                yield NormalizedResponse(stop_reason="end_turn")
-    async def _chat_anthropic_format(
-        self, messages: list[NormalizedMessage], tools: list[ToolSchema]
-    ) -> AsyncGenerator[NormalizedResponse, None]:
-        anthropic_messages = self._convert_to_anthropic_messages(messages)
-        anthropic_tools = self.format_tools(tools) if tools else []
-
+    async def _chat_anthropic_format(self, messages, tools):
+        from services.providers.completion import normalize_stop, completion_error, strict_arguments
+        from services.providers.thinking import ThinkTagParser
+        from core.schemas import NormalizedToolCall
+        parser = ThinkTagParser()
+        calls, current_tool, raw, reason = [], None, "", "unknown"
+        finished = False
+        input_tokens = output_tokens = 0
         try:
             async with self.client.messages.stream(
                 model=self.model_name,
-                max_tokens=settings.anthropic_max_tokens,
-                messages=anthropic_messages,
-                tools=anthropic_tools,
+                max_tokens=self.config.anthropic_max_tokens,
+                system="\n\n".join(message.content or "" for message in messages if message.role == "system"),
+                messages=self._convert_to_anthropic_messages(messages),
+                tools=self.format_tools(tools) if tools else [],
             ) as stream:
-                current_tool: dict | None = None
-                json_buffer = ""
-                think_parser = ThinkTagParser()
-                input_tokens = 0
-                output_tokens = 0
-
                 async for event in stream:
+                    if finished:
+                        yield NormalizedResponse(provider_error={"code": "PROVIDER_INCOMPLETE"})
+                        return
                     if event.type == "message_start":
-                        if hasattr(event.message, "usage") and event.message.usage:
-                            input_tokens = event.message.usage.input_tokens
+                        input_tokens = getattr(getattr(event.message, "usage", None), "input_tokens", 0)
                     elif event.type == "message_delta":
-                        if hasattr(event, "usage") and event.usage:
-                            output_tokens = event.usage.output_tokens
-                    elif event.type == "content_block_start":
-                        if event.content_block.type == "tool_use":
-                            current_tool = {"id": event.content_block.id, "name": event.content_block.name}
-                            json_buffer = ""
+                        output_tokens = getattr(getattr(event, "usage", None), "output_tokens", output_tokens)
+                        stop = getattr(getattr(event, "delta", None), "stop_reason", None)
+                        if stop is not None:
+                            reason = normalize_stop(stop)
+                    elif event.type == "content_block_start" and event.content_block.type == "tool_use":
+                        current_tool = event.content_block
+                        raw = ""
                     elif event.type == "content_block_delta":
                         if event.delta.type == "text_delta":
-                            for kind, content in think_parser.feed(event.delta.text):
-                                if kind == "thinking":
-                                    yield NormalizedResponse(thinking_content=content)
-                                else:
-                                    yield NormalizedResponse(text_content=content, stop_reason="")
+                            for kind, text in parser.feed(event.delta.text):
+                                yield NormalizedResponse(**{"thinking_content" if kind == "thinking" else "text_content": text})
                         elif event.delta.type == "thinking_delta":
-                            yield NormalizedResponse(thinking_content=event.delta.thinking, stop_reason="")
+                            yield NormalizedResponse(thinking_content=event.delta.thinking)
                         elif event.delta.type == "input_json_delta":
-                            json_buffer += event.delta.partial_json
-                    elif event.type == "content_block_stop":
-                        if current_tool:
-                            args = parse_tool_arguments(json_buffer, current_tool["name"])
-                            yield NormalizedResponse(
-                                tool_calls=[NormalizedToolCall(call_id=current_tool["id"], tool_name=current_tool["name"], arguments=args)],
-                                stop_reason="tool_calls",
-                            )
-                            current_tool = None
+                            raw += event.delta.partial_json
+                            if len(raw.encode()) > self.config.llm_output_max_bytes:
+                                yield NormalizedResponse(provider_error={"code": "PROVIDER_OUTPUT_LIMIT"})
+                                return
+                    elif event.type == "content_block_stop" and current_tool:
+                        try:
+                            arguments = strict_arguments(raw or json.dumps(getattr(current_tool, "input", {})))
+                            if not current_tool.id or not current_tool.name:
+                                raise ValueError("Missing tool identity")
+                            calls.append(NormalizedToolCall(call_id=current_tool.id, tool_name=current_tool.name, arguments=arguments))
+                        except (ValueError, RecursionError):
+                            yield NormalizedResponse(provider_error={"code": "PROVIDER_INVALID_TOOL_ARGUMENTS"})
+                            return
+                        current_tool = None
+                        if len(calls) > self.config.llm_tool_batch_limit:
+                            yield NormalizedResponse(provider_error={"code": "TOOL_BATCH_LIMIT"})
+                            return
                     elif event.type == "message_stop":
-                        for kind, content in think_parser.flush():
-                            if kind == "thinking":
-                                yield NormalizedResponse(thinking_content=content)
-                            else:
-                                yield NormalizedResponse(text_content=content, stop_reason="")
-                        if input_tokens > 0 or output_tokens > 0:
-                            yield NormalizedResponse(token_usage={"input": input_tokens, "output": output_tokens})
-                        yield NormalizedResponse(stop_reason="end_turn")
-        except Exception as e:
-            logger.error("Anthropic API error: %s", e)
-            error_message = format_provider_error(e, "Anthropic", self.model_name)
-            yield NormalizedResponse(
-                text_content=error_message,
-                stop_reason="end_turn",
-                provider_error={
-                    "provider": "Anthropic",
-                    "model": self.model_name,
-                    "error_type": type(e).__name__,
-                    "message": error_message,
-                },
-            )
-            return
+                        finished = True
+                        for kind, text in parser.flush():
+                            yield NormalizedResponse(**{"thinking_content" if kind == "thinking" else "text_content": text})
+                        yield NormalizedResponse(token_usage={"input": input_tokens, "output": output_tokens})
+                        if reason not in {"end_turn", "tool_calls"} or current_tool or bool(calls) != (reason == "tool_calls"):
+                            yield NormalizedResponse(stop_reason=reason, provider_error={"code": completion_error(reason)})
+                            return
+                        if len({call.call_id for call in calls}) != len(calls):
+                            yield NormalizedResponse(provider_error={"code": "PROVIDER_INVALID_TOOL_ARGUMENTS"})
+                            return
+                        yield NormalizedResponse(tool_calls=calls, stop_reason=reason)
+            if not finished:
+                yield NormalizedResponse(provider_error={"code": "PROVIDER_INCOMPLETE"})
+        except Exception:
+            yield NormalizedResponse(provider_error={"code": "PROVIDER_ERROR"})

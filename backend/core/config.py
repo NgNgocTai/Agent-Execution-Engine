@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "anthropic/claude-3-haiku"
     anthropic_base_url: str = "https://openrouter.ai/api/v1"
+    anthropic_protocol: Literal["auto", "anthropic", "openai_compatible"] = "auto"
     anthropic_max_tokens: int = 4096
     anthropic_reasoning_max_tokens: int = 1024
     deepseek_api_key: str = ""
@@ -181,6 +182,14 @@ class Settings(BaseSettings):
                     "Production requires an external worker and live data sources"
                 )
         return self
+
+    @property
+    def resolved_anthropic_protocol(self):
+        if self.anthropic_protocol != "auto":
+            return self.anthropic_protocol
+        from urllib.parse import urlsplit
+        host = urlsplit(self.anthropic_base_url).hostname
+        return "anthropic" if not self.anthropic_base_url or host == "api.anthropic.com" else "openai_compatible"
 
     model_config = {
         "env_file": os.environ.get("NOC_AGENT_ENV_FILE", str(ROOT_DIR / ".env")),

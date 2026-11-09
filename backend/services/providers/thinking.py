@@ -88,24 +88,9 @@ def get_reasoning_delta(delta) -> str | None:
 
 
 def parse_tool_arguments(arguments_str: str, tool_name: str = "") -> dict:
-    if not arguments_str:
-        return {}
-
-    try:
-        parsed = json.loads(arguments_str)
-    except json.JSONDecodeError as e:
-        logger.warning("Malformed tool arguments for '%s': %s", tool_name, e)
-        return {}
-
-    if not isinstance(parsed, dict):
-        logger.warning(
-            "Tool arguments for '%s' must be a JSON object, got %s",
-            tool_name,
-            type(parsed).__name__,
-        )
-        return {}
-
-    return parsed
+    # Never substitute defaults for a malformed or incomplete tool invocation.
+    from services.providers.completion import strict_arguments
+    return strict_arguments(arguments_str)
 
 
 def _extract_error_body(error: Exception):

@@ -12,6 +12,8 @@ from services.context_manager import prepare_context, ContextBudgetExceeded
 
 
 async def complete(provider, messages, tools):
+    from services.run_configuration import execution_settings
+    settings = execution_settings()
     # A partial stream is never retried or combined with another provider.
     try:
         messages = [NormalizedMessage.model_validate(redact(message)) for message in messages]
@@ -29,10 +31,17 @@ async def complete(provider, messages, tools):
                         async with aclosing(candidate.chat_completion(messages, tools)) as stream:
                             async for response in stream:
                                 if response.provider_error:
+                                    if response.provider_error.get("code"):
+                                        yield response
+                                        return
                                     kind = response.provider_error.get("error_type", "")
                                     transient = kind in {"RateLimitError", "APIConnectionError", "APITimeoutError", "InternalServerError"}
                                     error = "PROVIDER_UNAVAILABLE" if transient else "PROVIDER_ERROR"
                                     break
+                                if response.stop_reason and response.stop_reason not in {"end_turn", "tool_calls"}:
+                                    from services.providers.completion import completion_error
+                                    yield NormalizedResponse(provider_error={"code": completion_error(response.stop_reason)})
+                                    return
                                 output_bytes += len((response.text_content or "").encode()) + len((response.thinking_content or "").encode())
                                 output_bytes += len(json.dumps([call.model_dump() for call in response.tool_calls], ensure_ascii=False).encode())
                                 tool_count += len(response.tool_calls)
