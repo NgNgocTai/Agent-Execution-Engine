@@ -1,0 +1,109 @@
+LLM AND RUN CONFIGURATION CONTRACTS — 09/11/2026
+
+Provider completion
+-------------------
+OpenAI-compatible streams (OpenAI, DeepSeek and Anthropic router mode) share
+one parser. A tool batch is exposed only after tool_calls termination and valid
+object JSON for every call. Native Anthropic holds tools until message_stop and
+uses message_delta.stop_reason. Native system instructions use the system field.
+
+Malformed JSON, duplicate JSON keys, non-finite numbers, missing call identities,
+empty/duplicate batches, filtered/truncated output and EOF without termination
+fail the model step. A malformed call is never replaced with {}. An explicit {}
+remains valid for an argument-free tool. No command in a partial batch executes.
+Usage-only trailing chunks remain supported. Contract failures do not trigger a
+retry/fallback, even when there is no text yet; no generated content is combined
+with another attempt. Existing retry rules still apply to transient transport
+failures before output.
+
+Public error codes:
+- PROVIDER_TRUNCATED: length / max_tokens.
+- PROVIDER_FILTERED: content_filter / refusal.
+- PROVIDER_INCOMPLETE: unknown termination, missing terminal or inconsistent batch.
+- PROVIDER_INVALID_TOOL_ARGUMENTS: malformed/non-object/non-finite/duplicate JSON
+  or invalid tool identity/batch.
+- PROVIDER_OUTPUT_LIMIT / TOOL_BATCH_LIMIT: configured resource limits.
+
+Protocol configuration
+----------------------
+Native Anthropic:
+  ANTHROPIC_PROTOCOL=anthropic
+  ANTHROPIC_BASE_URL=https://api.anthropic.com
+  ANTHROPIC_API_KEY=<configure separately; never commit>
+
+An existing OpenAI-compatible router:
+  ANTHROPIC_PROTOCOL=openai_compatible
+  ANTHROPIC_BASE_URL=https://your-router.example/v1
+
+Default auto mode is a compatibility bridge: empty URL or exact host
+api.anthropic.com selects native; other URLs keep the legacy router protocol.
+Set protocol explicitly for custom native endpoints. A nonempty URL alone no
+longer always forces OpenAI format. New runs persist the resolved protocol.
+Provider base URLs may not embed userinfo, query strings or fragments in run
+snapshots; supply authentication through the dedicated key fields.
+
+Pinned run settings and migration
+---------------------------------
+Migration 0010 adds nullable runs.execution_config. It stores a versioned snapshot
+of primary/fallback model IDs, endpoints, resolved protocol, system prompt/hash,
+provider output/context/deadline/retry limits, run token/cost limits and pricing
+configuration. No API key, SSH/DB credential or auth principal is persisted there.
+The public run response exposes configuration version, prompt hash and model/
+protocol candidates, not the full prompt, endpoint or secret settings.
+
+This snapshot contract applies to durable POST /api/runs. The legacy development
+POST /api/chat endpoint remains a compatibility path and is disabled in production.
+Snapshot capture happens at run admission without constructing an SDK client.
+An idempotent retry returns the originally accepted run even if server settings
+have changed. Worker execution/resume binds settings through a ContextVar;
+parallel runs cannot overwrite each other's configuration. Provider instances
+also retain their model/endpoint configuration. Keys are taken from current
+configuration so rotation remains possible. Unavailable keys/endpoints cause
+an explicit run failure; the system does not silently re-resolve a new model.
+
+Auth, roles, conversation ownership, skill revocation, infrastructure allowlists,
+SSH timeouts/cooldowns, worker lease/fencing, admission quota and outer worker run
+watchdog remain live operational/security policy. They are not overwritten by a
+historical snapshot. Snapshot pinning is not permission to bypass current policy.
+
+Existing runs keep execution_config=NULL during migration: historical values
+cannot be reconstructed reliably. Queued/resumed legacy runs fail before model/
+tool execution with CHECKPOINT_INCOMPATIBLE. A legacy pending approval is rejected
+with HTTP 409 before the durable command claim through either approval route.
+It can still be rejected/cancelled. Previously completed runs remain readable;
+the public configuration summary indicates requires_new_run for unpinned runs.
+
+Rollout: finish or cancel queued/waiting runs before deploying; back up the control
+DB and stop writers as in runbook.txt; migrate to head (0010), then restart the
+web/worker together. Do not backfill old snapshots from current environment.
+A worker with the new model cannot run against the pre-0010 schema. This change
+has not been applied to the user's live control DB by the implementation task.
+
+Skill tool names
+-----------------
+New skill pins use naming_version=2. Multi-script names are at most 64 characters
+including the hash suffix. Truncated names hash both the full package name and
+script path, preserving distinction between packages with the same prefix.
+The registry rejects collisions rather than silently overwriting a tool.
+Short names keep their previous spelling. Existing pins without naming_version
+use legacy naming; an oversized legacy name blocks resume with an explicit
+checkpoint compatibility failure. Script/version/hash mappings remain pinned;
+no pending call is silently renamed or reassigned.
+
+Validation
+----------
+Regression tests cover all three compatible adapters, native Anthropic termination,
+protocol selection, valid usage tails, invalid JSON/batch/stop reasons, no command
+execution or retry after contract failure, 20-script long names/collisions, secret
+exclusion, fallback/client model pinning, concurrent contexts, idempotent admission,
+worker execution after config changes, both legacy approval routes and migration
+preservation. test_runs also changes model settings while approval is pending and
+checks the resumed model against the original snapshot, in SQLite and PostgreSQL.
+
+Local evidence: .check-results/p1-contracts-final.log, p1-regressions.log,
+p1-runs.log, p1-contract-evals.log and p1-workflow-evals.log.
+Live LLM requests and production deployment are not part of these offline gates.
+
+Final local gate: 189 backend tests passed with no skips; PostgreSQL, SSH loopback
+and real Docker sandbox included. Ruff, 12 contract evals, 20 workflow evals and
+6 frontend unit tests passed. Browser/live-provider/production rollout were not run.

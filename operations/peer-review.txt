@@ -1,0 +1,331 @@
+ĐỐI CHIẾU SOURCE TELECOM AGENT — 08/11/2026
+
+Project mình: D:\Code\VDT\Agent
+Branch: feature/upgrade-p0-persistence; baseline: 2e2fb6c.
+Project tham chiếu: D:\Code\VDT\Telecom-Agent-Execution-engine
+Commit tham chiếu: ff42777b70819353d5a44c1ccddebf9acd60aa22.
+
+KẾT LUẬN
+
+Vẫn cần nâng cấp, nhất là khả năng sử dụng skill và dữ liệu NOC thực tế.
+Project tham chiếu có progressive disclosure, chọn skill/model, nhiều capability
+theo site và ví dụ RAN/core-link. Project mình đã có AST, scaffold, pipeline review,
+multi-script, version pin và sandbox; không cần xây lại những phần đó.
+Không có cơ sở kết luận hai project ngang chất lượng vận hành chỉ qua source.
+Nền worker, quyền truy cập, replay và cách cô lập script của mình cần được giữ.
+
+PHẠM VI VÀ GIỚI HẠN ĐỌC SOURCE
+
+Lập inventory 188 file text do project tham chiếu quản lý, 30.067 dòng:
+- 74 file backend/app: orchestration, adapter LLM, API, model/repository,
+  connector, validation, sandbox, streaming và telemetry.
+- 26 file frontend: chat, cấu hình, lịch sử/timeline, admin/upload/review,
+  component, thư viện, unit test và cấu hình build.
+- 23 file Agent_skill: 7 bộ skill, scripts, SKILL.md, references và metadata.
+- 16 file Alembic/config/template, bao gồm 13 migration.
+- 23 file backend/tests: conftest và 22 file test.
+- 9 file eval và 17 file root/docs/CI/deploy/cấu hình khác.
+
+Đọc logic triển khai Python, frontend và cấu hình; một số Python được hiển thị
+qua AST unparse để bỏ comment/docstring. Với 22 file backend test, rà toàn bộ
+tên test và assertion/contract; không tuyên bố đã đọc từng dòng fixture/mock.
+Đã đọc code eval và frontend unit test. Đây là review source, không phải chứng
+nhận toàn bộ test bên kia đang pass. Không chạy code skill bên kia, không gọi
+LLM, SSH, DB hạ tầng hay deploy. Lockfile, dependency, build cache, ảnh và dữ liệu
+bí mật không thuộc phạm vi đọc nội dung. 7 ZIP chỉ kiểm kê entry/hash, không
+chạy; các probe import bên dưới được dựng từ thư mục source skill.
+
+Inventory/hash và hình thức rà từng file: operations/peer-review-files.tsv.
+Bằng chứng cục bộ: .check-results/peer-audit/inventory.json, coverage.json,
+probes.json, package-inventory.json. Coverage là sổ theo dõi thao tác đọc,
+không phải tỷ lệ test coverage hoặc bằng chứng đã hiểu mọi dòng mã.
+backend/.python-version được kiểm tra riêng: 3.12.
+
+ĐÃ TÁI HIỆN OFFLINE TRÊN PROJECT MÌNH
+
+Probe chỉ import module của mình, ZIP trong RAM, mock SDK/model; không kết nối
+dịch vụ và không thực thi script upload. Mã probe local: .venv/peer_probes.py.
+
+1. Manifest tên 63 ký tự hợp lệ + multi-script sinh tool 73 ký tự. Contract
+   ToolDefinition bên kia giới hạn 64. Đây là thiếu chặn tương thích ở mình;
+   chưa gọi provider thật để khẳng định thông báo HTTP cụ thể.
+2. InputField(kind='array') bị từ chối. Đây là giới hạn có chủ ý của schema hiện tại.
+3. ZIP dựng từ core-link-impact-summary, ran-kpi-anomaly-triage và
+   node-health-autoremediate nguyên source đều bị inspect_archive từ chối:
+   'Unsupported or duplicate archive entry'. Hai gói đầu có agents/openai.yaml;
+   gói node có .sh. Không thể gọi hiện tại là tương thích nguyên bản các gói đó.
+4. ANTHROPIC_BASE_URL=https://api.anthropic.com vẫn chọn _use_openai_format=True.
+   Nhánh native Anthropic đã tồn tại khi base URL rỗng; thiếu cấu hình protocol
+   rõ ràng và native custom endpoint, không phải thiếu hoàn toàn Anthropic.
+5. Fake model trả text + stop_reason='length': engine phát progress,
+   progress, text_delta, final_answer. Chưa phân biệt câu trả lời bị cắt với
+   hoàn tất bình thường. Adapter thực tế cũng chưa chuẩn hóa đầy đủ finish reason.
+
+DANH SÁCH CẦN LÀM — THỨ TỰ ƯU TIÊN
+
+P1-01. Sửa contract LLM/tool trước khi mở rộng catalog
+
+Mình: backend/services/skill_catalog.py:111, :130; skill_validation.py:57;
+services/providers/anthropic_provider.py:22; openai_provider.py:154;
+services/agent_service.py:123; core/schemas.py:59.
+Bên kia: backend/app/llm/schemas.py:54; langchain_messages.py:97;
+langchain_model.py dùng ChatAnthropic/ChatOpenAI theo loại adapter.
+
+Làm:
+- Tên tool ổn định trong giới hạn contract từng adapter; cắt phần tên trước
+  suffix hash, phát hiện collision. Giữ mapping tới version/script gốc.
+- Cấu hình protocol explicit (anthropic/openai_compatible), giữ tương thích
+  cấu hình router hiện tại qua migration/deprecation có thông báo.
+- Chuẩn hóa stop/tool/length/filter/unknown; engine xử lý partial/error có mã
+  rõ ràng. Không tự gửi lại request khi đã có output hoặc tool có side effect.
+Nghiệm thu: tên dài và 20 script không trùng; hai protocol có fake-client contract;
+max_tokens/filter/malformed tool JSON không thành success hoặc hành động nửa chừng.
+Lưu ý: bên kia chuẩn hóa finish reason tốt hơn, nhưng chưa thấy finalizer buộc
+riêng LENGTH/CONTENT_FILTER; đây là chỗ mình nên làm đầy đủ hơn cả hai.
+
+P1-02. Lưu cấu hình đã resolve của từng run
+
+Mình: backend/repositories/run_models.py:17 chỉ lưu provider và skill pins;
+services/run_worker.py:124 tạo provider từ cấu hình hiện tại.
+Bên kia: backend/app/database/models/agent_runs.py lưu model, prompt_version,
+run_config_json; services/agent_execution.py truyền config vào graph.
+
+Làm migration cho model ID, protocol, prompt hash/version, output/context/run
+budget và fallback model IDs; resolve trước admission, đưa vào request hash.
+Không lưu API key/credential. Approval resume dùng snapshot cấu hình của run;
+quyền hiện tại, revocation và policy an toàn vẫn phải kiểm tra lại.
+Nghiệm thu: đổi model/prompt khi chờ approve không âm thầm đổi run; UI cho biết
+model dự kiến/model thực dùng và fallback; cấu hình không còn dùng được phải báo rõ.
+
+P1-03. Schema input/output có cấu trúc cho custom skill
+
+Mình: backend/services/skill_validation.py:19–53 chỉ có scalar;
+skill_pipeline.py và sandbox_executor.py kiểm tra output mode, chưa có schema
+nghiệp vụ riêng cho mọi kết quả JSON.
+Bên kia: backend/app/agent/tool_validation.py, builtin_runners.py hỗ trợ object,
+array/nested properties; các skill RAN/core-link nhận records và thresholds.
+
+Làm phiên bản run-spec mới: object/array có schema đệ quy bị chặn depth, tổng
+node, item/property/string/byte count, finite number và additionalProperties.
+Dùng cùng validator cho API, smoke và runtime. Thêm output_schema được review
+và pin hash; JSON đúng cú pháp nhưng sai shape vẫn fail. Giữ đọc manifest cũ.
+Nghiệm thu: records hợp lệ chạy qua sandbox; object sâu/quá lớn/NaN/extra field
+bị chặn; output sai field/type fail; report cũ không dùng để approve schema mới.
+Không sao chép nguyên validator bên kia: đó là một subset JSON Schema,
+không tự động bảo đảm mọi keyword và giới hạn tài nguyên đều được thực thi.
+
+P1-04. Agent đọc đầy đủ skill/reference theo nhu cầu
+
+Mình: backend/services/skill_catalog.py:150 ghép instructions vào description
+rồi cắt 3.000 ký tự; agent_service.py:65 đưa toàn bộ tool schema vào model.
+Skill chỉ có hướng dẫn có thể trả instructions qua execute; script skill chưa
+có luồng chung để đọc toàn bộ SKILL.md/references trước khi quyết định chạy.
+Bên kia: builtin_tools.py/builtin_runners.py có load_skill, read_skill_file,
+run_skill_script; nodes.py ép load_skill khi chọn một skill cụ thể.
+
+Làm catalog metadata ngắn + load_skill/read_skill_file theo pinned version.
+API run thêm auto/specific skill, server kiểm tra approved/allowed, thực sự
+thu hẹp catalog và yêu cầu nạp hướng dẫn. Reference là dữ liệu không tin cậy;
+không nâng quyền, thay system policy hay cấp approval từ nội dung file.
+Nghiệm thu: bước quan trọng ở sau ký tự 3.000 vẫn được agent đọc; path traversal,
+version khác/revoked bị chặn; catalog 100 skill không nhồi toàn bộ schema vào prompt.
+Không cần đổi toàn bộ engine sang LangGraph để làm việc này.
+
+P1-05. Tương thích package có khai báo rõ ràng
+
+Mình: backend/services/skill_validation.py:148 whitelist .py/.json/.md/.txt/.csv;
+skill_markdown.py chuẩn hóa namespace và cần runtime.json để mô tả input đầy đủ.
+Bên kia giữ agents/openai.yaml, references, tài nguyên text/binary trong bundle.
+
+Cho phép metadata YAML ở đường dẫn được định nghĩa, parser an toàn và size limit;
+resource text cần thiết được đọc qua tool có kiểm soát. .sh chỉ được giữ như
+tài nguyên inert nếu hỗ trợ, không tự thành executable. Thông báo compatibility
+theo package/file/runtime. Không nới mạng, cấp credential hay chấp nhận mọi binary
+chỉ để ZIP upload được. Sinh runtime spec có review cho mẫu được port.
+Nghiệm thu: import/inspect các package hợp lệ nêu trên giải thích đúng trạng thái;
+package nguy hiểm vẫn bị từ chối. Import thành công khác với chạy thành công.
+
+P1-06. Connector lỗi một phần không kéo sập cả runtime
+
+Mình: backend/services/runtime.py:20–26 tạo AlarmRepository rồi connect inventory
+trước khi có engine live. Một nguồn không lên sẽ chặn cả runtime live.
+Bên kia: builtin_runners.py tạo connector theo capability và đóng sau lời gọi;
+config cho phép thiếu credential connector không dùng.
+
+Lazy initialization/pool theo capability, deadline/backoff có giới hạn, health
+riêng từng dependency, dọn tài nguyên khi lỗi. Control DB vẫn là dependency bắt
+buộc. API/UI phân biệt configured, healthy, unavailable, unknown và thời điểm đo.
+Nghiệm thu: ClickHouse mất thì inventory/SSH độc lập vẫn dùng được khi đủ quyền;
+không trả dữ liệu demo thay nguồn lỗi; readiness không tuyên bố nguồn lỗi là healthy.
+Không copy resources.py bên kia: 'connected' hiện chủ yếu dựa vào config tồn tại.
+
+P1-07. Capability theo site và cấp dữ liệu cho skill qua backend
+
+Mình: backend/services/skills/input_models.py và repositories/clickhouse_repo.py,
+postgres_repo.py chưa có bộ site-scoped capability tương ứng; aggregate bị chặn
+với principal hạn chế vì chưa có row scope adapter.
+Bên kia: builtin_runners.py:205 resolve site/station -> device IDs, có site alarm
+summary, active alarms, inventory, node alias/ping/restart và schema discovery mẫu.
+
+Làm canonical site/device identity, ambiguity handling và tenant/site authorization
+trước query. SQL template backend-owned, tham số hóa, read-only/statement timeout,
+row limit/pagination. Schema discovery chỉ trả metadata được cho phép. Typed
+capability broker lấy dữ liệu rồi truyền JSON có giới hạn cho script sandbox;
+không đưa DSN, password, raw SQL/SSH hay network chung cho custom code.
+Nghiệm thu: hỏi theo site trả đúng device, principal site A không đọc site B;
+nguồn lỗi/không có quyền/không có dữ liệu là ba kết quả khác nhau; audit đủ provenance.
+SSO và row scope là nhu cầu triển khai của mình, không phải tính năng đã thấy
+hoàn chỉnh ở project tham chiếu.
+
+P2-01. Port workflow RAN triage và core-link impact trên dữ liệu thật
+
+Bên kia: Agent_skill/ran-kpi-anomaly-triage/scripts/triage_ran_kpis.py;
+Agent_skill/core-link-impact-summary/scripts/summarize_link_impact.py.
+Mình đã có alarm enrichment, statistics, inventory và node remediation; regex
+IP/NE/interface/cell/AS/VLAN đã có, không ghi thành tính năng còn thiếu.
+
+Port thuật toán phân loại/rank và giải thích driver thành skill đã review;
+threshold/calibration phải version hóa theo domain. Cần KPI source, topology,
+maintenance window, observed_at, unit và confidence phù hợp dữ liệu thật.
+Không suy ra root cause chắc chắn chỉ từ trọng số severity/latency/loss.
+Nghiệm thu: holdout do NOC xác nhận, no-data/stale/inconsistent-unit fixtures,
+đối chiếu top impacted sites và false positive; demo mode ghi rõ fixture.
+Bẫy bên kia: các script RAN/core-link có fallback sample khi không có records;
+get_site_kpi_snapshot thực tế là alarm_table_derived, không chứng minh có KPI RAN
+thật. Cửa sổ alarm neo vào MAX(time_created) có thể hiển thị dữ liệu cũ như mới.
+
+P2-02. Evidence và final answer có thể kiểm chứng
+
+Mình: backend/services/evidence.py:12 hiện observed_at=None; có retrieval time,
+entity và warning nhưng chưa buộc final answer tham chiếu evidence hợp lệ.
+Cả hai project chưa cung cấp bằng chứng source đủ để chứng nhận groundedness.
+
+Chuẩn hóa event time/ingestion time/clock skew; reference ID cho từng kết quả,
+schema field/unit/window; validator final kiểm tra citation và phát biểu số liệu
+quan trọng đối với tool record. Báo unknown/stale/conflicting khi thiếu dữ liệu.
+Nghiệm thu bằng holdout độc lập, không chỉ LLM-as-judge; không lấy retrieved_at
+làm thời điểm quan sát và không biến câu trả lời thiếu chứng cứ thành thành công.
+
+P2-03. UI sử dụng catalog, tài nguyên và lịch sử run
+
+Mình: frontend/src/components/Header.tsx, ChatInput.tsx chọn provider;
+RunStatus.tsx có timeline ngắn và intervention tại waiting_approval;
+backend/controllers/runs.py đã có list/snapshot/steps để mở rộng UI.
+Bên kia: frontend/app/chat/page.tsx có /skill, @resource, chọn model và xem
+timeline từng run cũ; components/chat-config-menu.tsx hiển thị cấu hình.
+
+Thêm model ID/availability từ server, auto/specific skill và lựa chọn resource
+đúng quyền; xem run cũ với input/output đã redact, trạng thái/usage/evidence.
+Giữ generation guard chống response muộn, replay parser và cancel hiện có.
+Không đưa host bí mật/DSN vào dropdown. Có thể dùng bộ component hiện tại.
+Nghiệm thu E2E: chuyển run liên tục, reload/reconnect/approve, selected skill
+thực sự ảnh hưởng request, model unavailable không bị âm thầm thay thế.
+
+P2-04. Context, prompt version và telemetry theo skill version
+
+Mình: backend/services/context_manager.py dùng UTF-8 bytes làm proxy bảo thủ,
+historical_excerpt là trích đoạn, không phải LLM semantic summary.
+Bên kia: agent/context_window.py có summary qua model; observability/langfuse.py
+quản lý prompt label/version; API skill có call_count/error_rate/latency.
+
+Thêm estimator phù hợp adapter/model, trigger/target riêng và summary tùy chọn
+trong budget. Giữ nguyên tool-call/result pairs, nguồn/ID/sự kiện quan trọng;
+summary là dữ liệu lịch sử không tin cậy, không dùng thay approval/evidence.
+Prompt registry có version/hash pin, fallback local, cache và rollback rõ ràng.
+Thống kê execution theo version/script với error/timeout/unknown, latency;
+tách riêng số lần load/read khỏi số lần execute và tránh metric label quá nhiều.
+Nghiệm thu: nén không mất entity/approval state; prompt service down không chặn
+run; đổi prompt không thay run pending; đối chiếu metrics với execution records.
+Không copy nguyên thống kê bên kia: package_loader_tools chỉ gồm load_skill và
+read_skill_file, nên cách gán run_skill_script vào package cần được sửa.
+
+P2-05. Intervention có trạng thái giao nhận, mở rộng tại checkpoint an toàn
+
+Mình: controllers/runs.py:241 chỉ nhận intervention khi waiting_approval.
+Bên kia: services/agent_execution.py, agent/nodes.py và repository/messages.py
+nhận active intervention, theo dõi pending/injected/undelivered.
+
+Nếu workflow cần: lưu từng intervention có ID, lifecycle và checkpoint đích,
+đưa vào giữa các batch; không sửa hành động đang được approve/executing.
+UI báo delivered/undelivered/cancelled, retry rõ ràng. Không tự đưa instruction
+thất bại của run cũ sang yêu cầu mới như cơ chế auto-requeue bên kia.
+Nghiệm thu race với final/cancel/lease loss; exactly-once injection trong
+checkpoint có transaction, không suy diễn đã giao chỉ vì API trả accepted.
+
+P2-06. Eval đối kháng và release gate có dữ liệu kiểm chứng
+
+Bên kia: evals/redteam.yaml, providers/backend_http.py và workflow/redteam.yml
+có flow generate attack -> HTTP/SSE backend. Offline Promptfoo là 8 policy cases;
+'online-eval' tải dataset nhưng vẫn gọi backend_policy.py, không mặc nhiên là
+đánh giá model online. Không dùng tên workflow làm bằng chứng chất lượng.
+Mình đã có offline workflow eval, quality dataset/Ragas và online opt-in.
+
+Thêm bộ attack cố định có nhãn vào CI: tool-output/SKILL prompt injection,
+cross-site read, approval bypass/replay, schema explosion, secret leakage,
+truncated/model-filtered output; đo cả policy trace và tool side effects.
+Generated redteam chạy có opt-in/budget, không dùng credential/hạ tầng thật,
+không tự upload nội dung lên dịch vụ ngoài. Phiên bản dataset/prompt/model được pin.
+Release cần holdout NOC, p95/queue/SSE lag, fault injection dependency và rollback
+rehearsal. Giữ các gate worker/fencing/SSH/Docker/browser đang có ở mình.
+
+P2-07. Schema integrity, hygiene và bảo trì
+
+Mình: repositories/run_models.py dùng status String, chưa có CHECK tương ứng;
+bên kia models/migrations có CHECK cho run/step/tool/approval states.
+Thêm constraint sau audit giá trị legacy và migration rehearsal; không chỉ đổi
+enum Python. Ruff mình mới chọn E9/F63/F7/F82; bên kia E/F/I/UP/B/ASYNC. Mở dần
+rule theo module, xử lý async blocking/resource lifecycle trước cosmetic cleanup.
+
+backend/noc_agent.dump đang tracked (git ls-files), kích thước 141.393 byte.
+Chỉ kiểm tra metadata, không đọc nội dung; chưa có bằng chứng nó chứa secret hay
+production data. Xác minh nguồn gốc, thay bằng seed/fixture tái tạo đã khử nhạy
+cảm nếu phù hợp, bổ sung rule artifact. Xóa file hiện tại không xóa Git history;
+không rewrite history/rotate credential chỉ dựa vào nghi ngờ này.
+
+NHỮNG PHẦN GIỮ CỦA MÌNH / KHÔNG COPY NGUYÊN BÊN KIA
+
+- External durable worker, lease/fencing, admission/idempotency và unknown
+  reconciliation: bên kia chủ yếu background task trong API process. LangGraph
+  checkpointer không tự thay thế job queue/worker recovery.
+- Server-side principal/role/ownership: peer docs/running-guide.md:6 thừa nhận
+  API chưa authentication/authorization. Không copy API/admin/ngrok như production.
+- SSE có sequence/replay/snapshot/heartbeat: peer background dùng queue không
+  giới hạn, SSE không event ID/replay như mình. Giữ parser/reducer và race guard.
+- Immutable reviewed skill version/report hash, fail-closed sandbox, image pin,
+  non-root, no credential/network: peer services/skills.py:181–192 auto-mark
+  scripts passed khi sandbox không khả dụng; docker_executor.py runtime có thể
+  forward credential và dùng network cấu hình chung. Không mở các lỗ này để
+  đạt 'compatibility'. AST chỉ là sàng lọc, sandbox vẫn cần là boundary.
+- SSH của mình có deadline/output bound/cooldown/post-check và unknown outcome;
+  không thay bằng sample autoremediation chỉ vì ít code hơn.
+- Không đổi React/Vite sang Next.js, hoặc engine sang LangGraph, chỉ vì repo kia
+  dùng chúng. Chỉ cân nhắc khi có workflow/maintenance cost chứng minh lợi ích.
+- Deploy peer reset branch trên host, uv sync/migrate/restart và image latest;
+  chưa phải mẫu immutable release có rollback/backup gate để bê nguyên.
+
+LỘ TRÌNH PR/COMMIT ĐỀ XUẤT
+
+1. fix(llm): bound skill tool names and normalize completion/protocol contracts
+   Phạm vi P1-01, fake-provider tests; không đổi orchestration.
+2. feat(runs): pin resolved model and prompt configuration — P1-02, migration,
+   pending-approval config-change regression và idempotency compatibility.
+3. feat(skills): add bounded structured inputs and reviewed output schemas
+   P1-03; schema/report/checkpoint compatibility trước, chạy Docker gate.
+4. feat(skills): load pinned instructions and resources on demand
+   P1-04/P1-05; package tests và selected-skill end-to-end.
+5. feat(connectors): isolate capability availability and dependency failures
+   P1-06; lỗi từng nguồn không kéo sập nguồn khác.
+6. feat(noc): add scoped site capabilities and skill data broker
+   P1-07; quyền site và provenance là gate, không bật raw SQL/network.
+7. feat(noc): add calibrated ran triage and core link impact workflows
+   P2-01/P2-02; fixture label + no-data/stale + holdout thật.
+8. feat(ui): expose skill model resource selection and historical runs — P2-03.
+9. feat(observability): track prompt context and versioned skill executions
+   P2-04; P2-05 triển khai riêng nếu cần active intervention.
+10. test(evals): add adversarial workflow and release acceptance gates
+    P2-06; constraint/hygiene/quality rule P2-07 chia commit độc lập.
+
+Các tiêu chí của mục trước phải trở thành gate của chính PR đó; không dồn toàn
+bộ kiểm chứng đến bước 10. Đây là backlog sau review, chưa triển khai các thay
+đổi runtime trong lượt này. Các kết quả 177 backend tests và Compose smoke trong
+upgrade.md thuộc đợt 02/11/2026, không phải vừa chạy lại ngày 08/11.

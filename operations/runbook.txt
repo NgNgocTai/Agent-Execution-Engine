@@ -191,3 +191,13 @@ Optional paid quality evaluation is a separate workflow_dispatch job. It require
 the authorize_paid_calls checkbox and an explicitly configured online-evaluation
 environment/provider. Set provider-side spending limits before invoking it.
 Offline pull-request checks do not use this job or need API keys.
+
+Provider contracts and pinned runs (09/11/2026)
+----------------------------------------------
+Apply migration head 0010 with web/worker writers stopped. Resolve or cancel old
+queued/waiting runs before rollout: existing rows remain unpinned and cannot
+approve/resume with an inferred configuration. See llm-run-contracts.txt for
+protocol compatibility, error codes, snapshot fields and rollout details.
+New runs pin model/prompt/provider budgets; current auth/revocation/infra policy
+still governs every execution. No live database migration was run by the code
+implementation task.
