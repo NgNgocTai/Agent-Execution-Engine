@@ -11,6 +11,8 @@ class SkillRegistry:
         self._skills: dict[str, BaseSkill] = {}
 
     def register(self, skill: BaseSkill) -> None:
+        if skill.name in self._skills:
+            raise ValueError("Duplicate tool name in skill catalog")
         self._skills[skill.name] = skill
 
     def get(self, name: str) -> BaseSkill | None:

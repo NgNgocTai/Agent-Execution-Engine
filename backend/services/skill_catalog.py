@@ -109,7 +109,7 @@ def resolved_manifest(record):
 
 
 class ScriptSkill(BaseSkill):
-    def __init__(self, record, sessions, script_path=None):
+    def __init__(self, record, sessions, script_path=None, naming_version=2):
         self.version_id, self.digest, self.sessions = (
             record.id,
             record.content_hash,
@@ -128,8 +128,9 @@ class ScriptSkill(BaseSkill):
         if len(specs) > 1:
             if script_path is None:
                 raise ValueError("Select a script from this multi-script package")
-            self.tool_name += (
-                "__" + hashlib.sha256(script_path.encode()).hexdigest()[:8]
+            identity = self.tool_name + "\0" + script_path if naming_version == 2 and len(self.tool_name) > 54 else script_path
+            self.tool_name = (self.tool_name[:54] if naming_version == 2 else self.tool_name) + (
+                "__" + hashlib.sha256(identity.encode()).hexdigest()[:8]
             )
         if script_path:
             spec = next(
@@ -219,6 +220,7 @@ async def registry_for_run(base, session, sessions, run):
                 "spec_hash": manifest_hash(
                     Manifest.model_validate_json(record.manifest)
                 ),
+                "naming_version": 2,
             }
         run.selected_skill_versions = json.dumps(pins)
         await session.flush()
@@ -241,5 +243,9 @@ async def registry_for_run(base, session, sessions, run):
                 raise ValueError("Pinned skill run-spec changed")
             specs = manifest.run_specs()
             for path in [spec.entrypoint for spec in specs] or [None]:
-                registry.register(ScriptSkill(record, sessions, path))
+                skill = ScriptSkill(record, sessions, path, pin.get("naming_version", 1))
+                if len(skill.name) > 64:
+                    from services.workflow.state import CheckpointIncompatible
+                    raise CheckpointIncompatible("Legacy tool names exceed the provider limit; start a new run")
+                registry.register(skill)
     return registry
