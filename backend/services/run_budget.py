@@ -15,11 +15,13 @@ class BudgetExceeded(ValueError):
 
 class RunBudget:
     def __init__(self, state=None):
+        from services.run_configuration import execution_settings
+        self.config = execution_settings().model_copy(deep=True)
         self.tokens = int((state or {}).get("tokens", 0))
         self.cost = (state or {}).get("estimated_cost", 0.0)
-        self.prices = json.loads(settings.llm_model_prices_json)
+        self.prices = json.loads(self.config.llm_model_prices_json)
         self.price_version = (state or {}).get(
-            "price_config_version", settings.llm_price_config_version
+            "price_config_version", self.config.llm_price_config_version
         )
 
     def reserve(self, provider, messages, tools):
@@ -28,11 +30,11 @@ class RunBudget:
             self.prices.get(getattr(candidate, "model_name", "unknown"))
             for candidate in candidates
         ]
-        if settings.llm_run_cost_limit is not None and (
-            self.cost is None or self.price_version != settings.llm_price_config_version
+        if self.config.llm_run_cost_limit is not None and (
+            self.cost is None or self.price_version != self.config.llm_price_config_version
         ):
             raise BudgetExceeded("RUN_COST_HISTORY_UNAVAILABLE")
-        if settings.llm_run_cost_limit is not None and any(
+        if self.config.llm_run_cost_limit is not None and any(
             rate is None for rate in rates
         ):
             raise BudgetExceeded("MODEL_PRICE_UNCONFIGURED")
@@ -43,28 +45,28 @@ class RunBudget:
         self.output_rate = max(
             (rate["output_per_million"] for rate in rates if rate), default=0
         )
-        self.attempt_bound = settings.llm_max_attempts * len(candidates)
+        self.attempt_bound = self.config.llm_max_attempts * len(candidates)
         safe = [
             NormalizedMessage.model_validate(redact(message)) for message in messages
         ]
         context = prepare_context(
             safe,
             tools,
-            settings.llm_context_tokens,
-            settings.llm_reserved_output_tokens,
-            settings.llm_context_margin,
-            settings.context_summary_enabled,
+            self.config.llm_context_tokens,
+            self.config.llm_reserved_output_tokens,
+            self.config.llm_context_margin,
+            self.config.context_summary_enabled,
         )
         self.input_estimate = estimate(context, tools)
         projection = (
-            self.input_estimate + settings.llm_output_max_bytes
+            self.input_estimate + self.config.llm_output_max_bytes
         ) * self.attempt_bound
-        if self.tokens + projection > settings.llm_run_token_limit:
+        if self.tokens + projection > self.config.llm_run_token_limit:
             raise BudgetExceeded("RUN_TOKEN_BUDGET_EXCEEDED")
         estimated_cost = (
             (
                 self.input_estimate * self.input_rate
-                + settings.llm_output_max_bytes * self.output_rate
+                + self.config.llm_output_max_bytes * self.output_rate
             )
             / 1_000_000
             * self.attempt_bound
@@ -72,8 +74,8 @@ class RunBudget:
         if not math.isfinite(estimated_cost):
             raise BudgetExceeded("INVALID_MODEL_PRICE")
         if (
-            settings.llm_run_cost_limit is not None
-            and (self.cost or 0) + estimated_cost > settings.llm_run_cost_limit
+            self.config.llm_run_cost_limit is not None
+            and (self.cost or 0) + estimated_cost > self.config.llm_run_cost_limit
         ):
             raise BudgetExceeded("RUN_COST_BUDGET_EXCEEDED")
 
@@ -110,7 +112,7 @@ class RunBudget:
         return {
             "tokens": self.tokens,
             "estimated_cost": self.cost,
-            "currency": settings.llm_budget_currency,
-            "price_config_version": settings.llm_price_config_version,
+            "currency": self.config.llm_budget_currency,
+            "price_config_version": self.config.llm_price_config_version,
             "accounting": "conservative admission estimate, not provider billing",
         }

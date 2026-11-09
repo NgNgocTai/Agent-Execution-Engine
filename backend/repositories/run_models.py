@@ -21,6 +21,7 @@ class Run(Base):
     )
     actor: Mapped[str] = mapped_column(String(255))
     provider: Mapped[str] = mapped_column(String(20))
+    execution_config: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_message: Mapped[str] = mapped_column(Text)
     user_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("messages.id"), nullable=True

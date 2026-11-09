@@ -70,6 +70,8 @@ def set_engine(e: AgentEngine) -> None:
 
 
 def _get_provider(name: str) -> LLMProvider:
+    from services.run_configuration import execution_settings
+    settings = execution_settings()
     providers = {
         "mock": MockProvider,
         "openai": OpenAIProvider,
@@ -329,6 +331,12 @@ async def approve_action(req: ApprovalDecisionRequest):
         if req.approved:
             active_run = await session.scalar(select(Run).where(Run.conversation_id == req.conversation_id, Run.active_key.is_not(None)))
             if active_run:
+                from services.run_configuration import load_configuration
+                from services.workflow.state import CheckpointIncompatible
+                try:
+                    load_configuration(active_run.execution_config, active_run.provider)
+                except CheckpointIncompatible:
+                    raise HTTPException(409, "Run configuration is missing or invalid; cancel and start a new run") from None
                 checkpoint = await session.get(RunCheckpoint, active_run.id)
                 state = json.loads(checkpoint.state) if checkpoint else {}
                 pending = state.get("pending_calls", [])

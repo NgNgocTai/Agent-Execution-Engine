@@ -27,4 +27,5 @@ Nêu rõ dữ liệu thiếu/truncated, entity chưa chắc chắn và phân bi�
 
 
 def get_system_prompt() -> str:
-    return SYSTEM_PROMPT.strip()
+    from services.run_configuration import execution_prompt
+    return execution_prompt(SYSTEM_PROMPT.strip())

@@ -102,10 +102,12 @@ async def append_event(session, run_id, event_type, payload):
 
 
 def public_run(run):
+    from services.run_configuration import configuration_summary
     return {
         "run_id": run.id,
         "conversation_id": run.conversation_id,
         "provider": run.provider,
+        "configuration": configuration_summary(run.execution_config),
         "user_message_id": run.user_message_id,
         "status": run.status,
         "sequence": run.sequence,
@@ -154,6 +156,11 @@ async def create_run(session, *, message, provider, conversation_id, idempotency
         raise HTTPException(
             429, "Active run limit reached; wait, cancel or reconcile an existing run"
         )
+    from services.run_configuration import capture_configuration
+    try:
+        execution_config = capture_configuration(provider)
+    except ValueError:
+        raise HTTPException(422, "Invalid provider execution configuration") from None
     repo = ConversationRepository(session)
     if conversation_id:
         conversation = await repo.get(conversation_id, for_update=True)
@@ -180,6 +187,7 @@ async def create_run(session, *, message, provider, conversation_id, idempotency
         conversation_id=conversation.id,
         actor=actor.subject,
         provider=provider,
+        execution_config=execution_config,
         user_message=message,
         status="queued",
         active_key=conversation.id,

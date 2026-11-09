@@ -66,8 +66,11 @@ class RunWorker:
             context = _principal.set(actor)
             correlation = current_run_id.set(run_id)
             provider = None
+            configuration_token = None
             try:
                 require("operator")
+                from services.run_configuration import bind_configuration, _configuration
+                configuration_token = bind_configuration(run.execution_config, run.provider)
                 if (
                     await ConversationRepository(session).get(run.conversation_id)
                     is None
@@ -237,6 +240,8 @@ class RunWorker:
                     await close_provider(provider)
                 current_run_id.reset(correlation)
                 _principal.reset(context)
+                if configuration_token is not None:
+                    _configuration.reset(configuration_token)
 
     async def process(self, run_id, token):
         execution = asyncio.create_task(self.execute(run_id, token))

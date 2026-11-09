@@ -139,6 +139,8 @@ class RunTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await claim(session, "new-worker"))
 
     async def test_resume_keeps_other_calls_in_pending_batch(self):
+        from services.run_configuration import execution_settings
+        seen_models = []
         class Skill(BaseSkill):
             name = "write_fixture"
             description = "Fixture"
@@ -149,6 +151,7 @@ class RunTest(unittest.IsolatedAsyncioTestCase):
         class Provider:
             async def chat_completion(self, messages, tools):
                 if any(message.role == "tool" for message in messages):
+                    seen_models.append(execution_settings().openai_model)
                     yield NormalizedResponse(text_content="Completed all calls")
                 else:
                     yield NormalizedResponse(tool_calls=[NormalizedToolCall(call_id="one", tool_name="node_health_remediate", arguments={"host": "node-a", "service": "api", "dry_run": False}),
@@ -167,6 +170,8 @@ class RunTest(unittest.IsolatedAsyncioTestCase):
             job = await claim(session, "worker")
         await worker.process(*job)
         self.assertEqual((await routes.snapshot(run.id))["status"], "waiting_approval")
+        config = json.loads(run.execution_config)
+        self.enterContext(patch.object(settings, "openai_model", "changed-while-awaiting-approval"))
         await routes.intervene(run.id, routes.InterventionRequest(message="Include a clear follow-up recommendation"))
         async with self.sessions() as session:
             original = await session.scalar(select(PendingApproval).where(PendingApproval.conversation_id == run.conversation_id))
@@ -180,6 +185,7 @@ class RunTest(unittest.IsolatedAsyncioTestCase):
         snapshot = await routes.snapshot(run.id)
         self.assertEqual(snapshot["status"], "succeeded")
         self.assertEqual(snapshot["messages"][-1]["content"], "Completed all calls")
+        self.assertEqual(seen_models, [config["options"]["openai_model"]])
         async with self.sessions() as session:
             executions = (await session.scalars(select(ToolExecution).where(ToolExecution.run_id == run.id))).all()
             self.assertEqual({execution.call_id for execution in executions}, {"one", "two"})
