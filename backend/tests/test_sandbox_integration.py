@@ -49,3 +49,35 @@ print(json.dumps({'status':'success','data':{'text':arguments['text'].upper(), '
         with patch.object(settings, "sandbox_image", os.environ["SANDBOX_TEST_IMAGE"]):
             with self.assertRaises(TimeoutError):
                 await execute_sandbox(manifest, files, {"text": "hello"})
+
+    async def test_structured_records_and_output_schema_run_through_sandbox(self):
+        from test_skill_pipeline import markdown_package
+        from services.skill_pipeline import analyze
+        record = {"type": "object", "properties": {"cell": {"type": "string"}, "drop_rate": {"type": "number", "minimum": 0, "maximum": 100}}, "required": ["cell", "drop_rate"]}
+        summary = {"type": "object", "properties": {"worst": {"type": "string"}, "count": {"type": "integer"}}, "required": ["worst", "count"]}
+
+        def package(code):
+            runtime = {"scripts": [{"entrypoint": "scripts/triage.py", "output_contract": "json",
+                "input_fields": [{"name": "records", "kind": "array", "shape": {"type": "array", "items": record, "maxItems": 500}}],
+                "sample_input": {"records": [{"cell": "a", "drop_rate": 1.5}, {"cell": "b", "drop_rate": 9}]},
+                "output_schema": summary}]}
+            return markdown_package({"runtime.json": json.dumps(runtime), "scripts/triage.py": code})
+
+        good = "import json\nrecords = json.load(open('args.json'))['records']\nworst = max(records, key=lambda r: r['drop_rate'])\nprint(json.dumps({'worst': worst['cell'], 'count': len(records)}))\n"
+        wrong_shape = "import json\nprint(json.dumps({'worst': 7, 'count': 'two', 'debug': True}))\n"
+        with patch.object(settings, "sandbox_image", os.environ["SANDBOX_TEST_IMAGE"]):
+            manifest, files, digest = inspect_archive(package(good))
+            _, report = await analyze(manifest, files, digest, runner=execute_sandbox)
+            self.assertTrue(report["ready_for_review"])
+            self.assertEqual(report["scripts"][0]["result"]["data"], {"worst": "b", "count": 2})
+            self.assertEqual(report["scripts"][0]["output_schema"], summary)
+            big = {"records": [{"cell": f"c{i}", "drop_rate": i % 100} for i in range(400)]}
+            result = await execute_sandbox(manifest.run_specs()[0], files, big)
+            self.assertEqual(result.data, {"worst": "c99", "count": 400})
+
+            manifest, files, digest = inspect_archive(package(wrong_shape))
+            _, report = await analyze(manifest, files, digest, runner=execute_sandbox)
+            self.assertFalse(report["ready_for_review"])
+            self.assertEqual(report["scripts"][0]["status"], "failed")
+            with self.assertRaises(ValueError):
+                await execute_sandbox(manifest.run_specs()[0], files, {"records": [{"cell": "a", "drop_rate": 1}]})

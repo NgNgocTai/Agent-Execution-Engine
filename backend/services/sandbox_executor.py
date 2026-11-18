@@ -200,7 +200,9 @@ async def execute_sandbox(manifest, files, arguments):
             if code != 0 or truncated or stderr_truncated:
                 raise ValueError("Sandbox failed or exceeded its output limit")
             from services.skill_pipeline import normalize_output
-            result = normalize_output(stdout, manifest.output_contract)
+            result = normalize_output(
+                stdout, manifest.output_contract, manifest.output_schema
+            )
             return result
     except FileNotFoundError as exc:
         raise SandboxUnavailable(

@@ -5,12 +5,27 @@ from io import BytesIO
 import json
 from pathlib import PurePosixPath
 import stat
-from typing import Literal
+from typing import Annotated, Literal
 import zipfile
 import unicodedata
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    WithJsonSchema,
+    create_model,
+    model_validator,
+)
 from services.skill_ast import analyze_python
+from services.skill_schema import (
+    MAX_VALUE_BYTES,
+    SchemaError,
+    public_schema,
+    validate_schema,
+    validate_value,
+)
 
 MAX_ARCHIVE = 2 * 1024 * 1024
 MAX_EXPANDED = 8 * 1024 * 1024
@@ -19,8 +34,45 @@ MAX_EXPANDED = 8 * 1024 * 1024
 class InputField(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
-    kind: Literal["string", "integer", "number", "boolean"]
+    kind: Literal["string", "integer", "number", "boolean", "object", "array"]
     required: bool = True
+    shape: dict | None = None
+
+    @model_validator(mode="after")
+    def check_shape(self):
+        if self.kind not in {"object", "array"}:
+            if self.shape is not None:
+                raise ValueError("Only object and array fields declare a shape")
+            return self
+        if self.shape is None:
+            raise ValueError("Object and array fields require a shape")
+        try:
+            validate_schema(self.shape)
+        except SchemaError as exc:
+            raise ValueError(f"Invalid input shape: {exc}") from exc
+        if self.shape["type"] != self.kind:
+            raise ValueError("Input shape type must match the field kind")
+        if self.kind == "object" and not self.required and self.shape.get("required"):
+            raise ValueError("Optional objects cannot have required properties")
+        return self
+
+
+def _structured(field):
+    shape = field.shape
+
+    def check(value):
+        validate_value(shape, value)
+        return value
+
+    base = dict if field.kind == "object" else list
+    return Annotated[base, AfterValidator(check), WithJsonSchema(public_schema(shape))]
+
+
+def _bounded_total(model):
+    size = len(json.dumps(model.model_dump(), ensure_ascii=False).encode())
+    if size > MAX_VALUE_BYTES:
+        raise ValueError("Skill input is too large")
+    return model
 
 
 class ScriptSpec(BaseModel):
@@ -31,12 +83,33 @@ class ScriptSpec(BaseModel):
     sample_input: dict = Field(default_factory=dict)
     timeout_seconds: int = Field(default=10, ge=1, le=30)
     output_contract: Literal["skill_result", "json", "text"] = "skill_result"
+    output_schema: dict | None = None
+
+    @model_validator(mode="after")
+    def check_output_schema(self):
+        if self.output_schema is None:
+            return self
+        try:
+            validate_schema(self.output_schema)
+        except SchemaError as exc:
+            raise ValueError(f"Invalid output schema: {exc}") from exc
+        if self.output_contract == "text" and self.output_schema["type"] != "string":
+            raise ValueError("A text output can only declare a string schema")
+        return self
 
     def input_model(self):
         fields = {}
         for field in self.input_fields:
             if field.name in fields:
                 raise ValueError("Duplicate input field")
+            if field.kind in {"object", "array"}:
+                fields[field.name] = (
+                    _structured(field),
+                    ...
+                    if field.required
+                    else Field(default_factory=dict if field.kind == "object" else list),
+                )
+                continue
             kind = {"string": str, "integer": int, "number": float, "boolean": bool}[
                 field.kind
             ]
@@ -50,6 +123,9 @@ class ScriptSpec(BaseModel):
         return create_model(
             "SkillInput",
             __config__=ConfigDict(extra="forbid", strict=True, allow_inf_nan=False),
+            __validators__={
+                "bounded_total": model_validator(mode="after")(_bounded_total)
+            },
             **fields,
         )
 
