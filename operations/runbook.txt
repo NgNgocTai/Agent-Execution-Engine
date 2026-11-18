@@ -194,8 +194,8 @@ Offline pull-request checks do not use this job or need API keys.
 
 Provider contracts and pinned runs (09/11/2026)
 ----------------------------------------------
-Apply migration head 0011 (adds nullable runs.requested_skill; 0010 pins run
-configuration) with web/worker writers stopped. Resolve or cancel old
+Apply migration head 0012 (0010 pins run configuration, 0011 adds nullable
+runs.requested_skill, 0012 adds status CHECK constraints) with web/worker writers stopped. Resolve or cancel old
 queued/waiting runs before rollout: existing rows remain unpinned and cannot
 approve/resume with an inferred configuration. See llm-run-contracts.txt for
 protocol compatibility, error codes, snapshot fields and rollout details.
@@ -270,3 +270,26 @@ Slack tokens, JWTs or "my password is X". Not covered here (needs opt-in budget
 and a model): generated red-team prompts against a live model, SSE lag/p95
 latency, dependency fault injection and rollback rehearsal. Those stay separate
 release gates. Approval replay and worker fencing are covered by their own tests.
+
+Schema integrity and hygiene (P2-07)
+------------------------------------
+Migration 0012 adds CHECK constraints on status for runs, run_jobs,
+tool_executions, run_steps, pending_approvals and skill_versions. The allowed
+values live in repositories/status_values.py (union of everything the code writes
+or reads; adding a status means editing that file, shipping a migration that
+replaces the constraint, and changing the code together). Before touching any
+table the migration audits existing rows and ABORTS with the table, value and row
+count of every unexpected status; nothing is rewritten silently. Resolve those rows
+(reconcile or correct them) and rerun. Back up first; downgrade needs backup/restore.
+Verified on SQLite (fresh, legacy-abort, keys/indexes/data preserved) and PostgreSQL
+16 (migration rehearsal and run tests). A test also scans services/controllers for
+status literals so a new status cannot be written without updating the constraint.
+Ruff now also enforces F401/F811/F841 (unused code), B023 and ASYNC; 33 unused
+imports were removed. Rules are widened gradually, not all at once.
+backend/noc_agent.dump is a tracked PostgreSQL custom-format dump (141 KB, added in
+commit 82fde3a). Nothing in the repository references it. Its contents were NOT read
+here, so it is unknown whether it holds secrets or production data. Decide whether to
+delete it and, if it came from production, whether to treat its history as exposed
+(deleting does not remove it from Git history; rewriting history or rotating
+credentials is a separate decision). *.dump is now git-ignored so new dumps are not
+committed, but the existing tracked file is untouched.

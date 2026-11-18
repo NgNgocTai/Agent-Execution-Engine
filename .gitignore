@@ -18,6 +18,9 @@ img/
 
 # Database
 *.db
+# Database dumps can hold production data; never track new ones.
+*.dump
+*.sql.gz
 
 # Generated dry-run eval reports
 backend/evals/results/ragas_quality_dry/
