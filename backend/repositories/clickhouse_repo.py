@@ -21,6 +21,18 @@ class AlarmRepository:
             connect_timeout=5,
             send_receive_timeout=10,
         )
+        # ClickHouse 26.x can fail "Cannot parse datetime" in its top-K dynamic filter on
+        # ORDER BY time_created ... LIMIT with several selected columns. Disable that
+        # optimizer only where the server has the setting (older servers reject unknown ones).
+        self._extra_settings = {}
+        try:
+            known = self.client.query(
+                "SELECT count() FROM system.settings WHERE name = 'use_top_k_dynamic_filtering'"
+            ).result_rows[0][0]
+            if known:
+                self._extra_settings = {"use_top_k_dynamic_filtering": 0}
+        except Exception:
+            logger.warning("Could not inspect ClickHouse settings; using server defaults")
 
     def get_alarms(self, error_code: str, window_min: int = 10, limit: int = 50) -> tuple[list[dict], int]:
         since = datetime.utcnow() - timedelta(minutes=window_min)
@@ -164,6 +176,9 @@ class AlarmRepository:
         if not self._query_lock.acquire(timeout=10):
             raise TimeoutError("Alarm data source busy")
         try:
+            merged = {**self._extra_settings, **(kwargs.pop("settings", None) or {})}
+            if merged:
+                kwargs["settings"] = merged
             return self.client.query(*args, **kwargs)
         finally:
             self._query_lock.release()
