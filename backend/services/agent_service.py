@@ -14,6 +14,8 @@ from services.providers.gateway import complete
 from services.run_budget import RunBudget, BudgetExceeded
 from services.context_manager import ContextBudgetExceeded
 from services.skills.registry import SkillRegistry
+from services.grounding import check_answer
+from core.config import settings
 from services.skill_guides import GUIDE_TOOLS, instructions_loaded
 from services.tool_executor import ToolExecutor
 from services.skills.base import SkillStatus
@@ -386,6 +388,24 @@ class AgentEngine:
                 output=accumulated_text or None,
             )
 
+        grounding = None
+        if settings.evidence_enforcement != "off":
+            grounding = check_answer(
+                accumulated_text, messages[_run_start(messages, user_message) :], user_message
+            )
+            if settings.evidence_enforcement == "strict" and grounding["status"] not in {
+                "grounded",
+                "not_applicable",
+            }:
+                error = emitter.error(
+                    "The answer is not supported by this run's tool evidence",
+                    "ANSWER_UNGROUNDED",
+                )
+                error.data["grounding"] = grounding
+                error.data["new_messages"] = messages[new_messages_start:]
+                yield error
+                return
+
         final = emitter.final_answer(
             total_tool_calls=total_tool_calls,
             total_duration_ms=total_duration_ms,
@@ -393,4 +413,6 @@ class AgentEngine:
             new_messages=messages[new_messages_start:],
         )
         final.data["budget"] = budget.snapshot()
+        if grounding is not None:
+            final.data["grounding"] = grounding
         yield final

@@ -22,7 +22,8 @@ CRITICAL QUY TẮC HIỂN THỊ REASONING:
 
 Trả lời: tiếng Việt, bullet points/bảng khi cần, ghi rõ nguồn từ tool nào.
 Nếu tool có evidence_id, trích đúng ID đó khi nêu kết luận; không tự tạo ID.
-retrieved_at là thời điểm truy vấn, không chứng minh dữ liệu còn mới khi observed_at chưa biết.
+retrieved_at là thời điểm truy vấn, không chứng minh dữ liệu còn mới. observed_at (nếu có) là thời điểm sự kiện mới nhất trong bản ghi; freshness=unknown nghĩa là chưa biết nguồn còn mới hay không, stale/clock_skew_suspected phải được nêu rõ.
+Chỉ nêu số liệu có trong kết quả tool; không tự tính hoặc suy đoán số. Mỗi kết luận số liệu phải kèm evidence_id thật.
 Nêu rõ dữ liệu thiếu/truncated, entity chưa chắc chắn và phân biệt lệnh exit 0 với post-check đã hồi phục."""
 
 
