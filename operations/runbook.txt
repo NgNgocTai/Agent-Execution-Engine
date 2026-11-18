@@ -202,3 +202,25 @@ protocol compatibility, error codes, snapshot fields and rollout details.
 New runs pin model/prompt/provider budgets; current auth/revocation/infra policy
 still governs every execution. No live database migration was run by the code
 implementation task.
+
+Independent data sources (P1-06)
+--------------------------------
+Alarm (ClickHouse) and inventory (PostgreSQL) connectors now connect lazily on
+first use (services/connectors.py). Startup and the worker no longer wait for
+them, so one source being down does not stop the other, the SSH remediation
+tool, or the application. The control database remains a hard dependency.
+Behaviour: connect deadline 8 s; after a connection failure the source is
+refused for 1 s, doubling to a 30 s cap, then retried; a query error (bad SQL)
+does not mark the source down; a lost connection drops the client and reconnects.
+A failed source yields SYSTEM_ERROR with error_code CONNECTOR_UNAVAILABLE and
+"no substitute data was used". device_inventory_lookup still returns inventory
+with alarm_source "unavailable" and active_alarms null (unknown, not zero).
+Alarm statistics and enrichment need both sources and fail with the named one.
+States: not_configured (host unset), unknown (never measured), healthy,
+unavailable, each with checked_at and only the exception TYPE as error_code
+(messages can hold hosts/credentials). GET /ready returns 200 with
+status "degraded" and a sources block when a source is down (readiness is gated
+by the control database only, so a data outage does not restart pods);
+GET /api/operations/connectors (viewer/operator/approver) returns the same
+measured state. Probes are cached 30 s. No demo or fixture data replaces a
+failed live source; fixture data_mode is an explicit separate setting.
