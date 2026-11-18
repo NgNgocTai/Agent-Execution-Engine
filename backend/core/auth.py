@@ -21,9 +21,13 @@ class Principal:
     roles: frozenset[str]
     hosts: frozenset[str] = frozenset()
     services: frozenset[str] = frozenset()
+    # Site/station scope for data capabilities: station ids or names, or "*".
+    sites: frozenset[str] = frozenset()
 
 
-LOCAL = Principal("local", frozenset({"admin"}), frozenset({"*"}), frozenset({"*"}))
+LOCAL = Principal(
+    "local", frozenset({"admin"}), frozenset({"*"}), frozenset({"*"}), frozenset({"*"})
+)
 _principal = ContextVar("principal", default=None)
 
 
@@ -40,6 +44,7 @@ def principal():
                         frozenset(
                             service.lower() for service in entry.get("services", [])
                         ),
+                        frozenset(site.lower() for site in entry.get("sites", [])),
                     )
             raise HTTPException(401, "Principal was revoked")
         return actor
@@ -64,6 +69,7 @@ def authenticate(token):
                 frozenset(entry["roles"]),
                 frozenset(host.lower() for host in entry.get("hosts", [])),
                 frozenset(service.lower() for service in entry.get("services", [])),
+                frozenset(site.lower() for site in entry.get("sites", [])),
             )
     raise HTTPException(401, "Invalid bearer token")
 

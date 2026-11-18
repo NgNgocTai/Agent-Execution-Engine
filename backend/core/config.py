@@ -125,6 +125,7 @@ class Settings(BaseSettings):
                 "roles",
                 "hosts",
                 "services",
+                "sites",
             }:
                 raise ValueError("Invalid auth principal fields")
             if not isinstance(entry.get("roles"), list) or any(
@@ -134,7 +135,7 @@ class Settings(BaseSettings):
             if any(
                 not isinstance(entry.get(name, []), list)
                 or any(not isinstance(value, str) for value in entry.get(name, []))
-                for name in ("hosts", "services")
+                for name in ("hosts", "services", "sites")
             ):
                 raise ValueError("Principal scopes must be lists of strings")
             digest = entry.get("token_sha256", "")
