@@ -5,6 +5,7 @@ import json
 from pydantic import ValidationError
 from core.policy import Decision, plan
 from core.redaction import redact
+from services.connectors import ConnectorUnavailable
 from services.evidence import evidence
 from core.config import settings
 
@@ -59,6 +60,14 @@ class ToolExecutor:
                 data=None,
                 error=f"Tool '{tool_name}' timeout sau {SKILL_TIMEOUT_SECONDS}s.",
                 execution_time_ms=SKILL_TIMEOUT_SECONDS * 1000,
+            )
+
+        except ConnectorUnavailable as e:
+            return SkillResult(
+                status=SkillStatus.SYSTEM_ERROR,
+                data={"error_code": "CONNECTOR_UNAVAILABLE", "connector": e.connector},
+                error=str(e),
+                execution_time_ms=(time.monotonic() - start) * 1000,
             )
 
         except Exception as e:

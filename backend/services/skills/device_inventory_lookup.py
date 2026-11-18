@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from services.connectors import ConnectorUnavailable
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
 from services.skills.input_models import InventoryInput
 
@@ -93,9 +94,30 @@ class DeviceInventoryLookupSkill(BaseSkill):
                 )
 
             # Step 2: Get active alarms for this device
-            active_alarms = await asyncio.to_thread(self.alarm_repo.get_active_alarms_by_device,
-                device["device_id"], limit=20
-            )
+            try:
+                active_alarms = await asyncio.to_thread(self.alarm_repo.get_active_alarms_by_device,
+                    device["device_id"], limit=20
+                )
+            except ConnectorUnavailable as exc:
+                # Inventory is still valid. Never report zero alarms for an
+                # alarm source that could not be queried.
+                return SkillResult(
+                    status=SkillStatus.SUCCESS,
+                    data={
+                        "device": {
+                            "device_id": device["device_id"],
+                            "name": device["name"],
+                            "device_type": device["device_type"],
+                            "ip_address": device["ip_address"],
+                            "vendor": device.get("vendor_name", "N/A"),
+                            "station": device.get("station_name", "N/A"),
+                        },
+                        "alarm_source": "unavailable",
+                        "active_alarms": None,
+                        "active_alarm_count": None,
+                        "warnings": [str(exc), "Alarm state is unknown, not zero."],
+                    },
+                )
 
             return SkillResult(
                 status=SkillStatus.SUCCESS,
