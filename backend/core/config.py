@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     max_active_runs_per_actor: int = Field(default=4, ge=1, le=100)
     fixture_delay_seconds: float = Field(default=0, ge=0, le=10)
     tool_output_max_bytes: int = Field(default=16384, ge=1024, le=65536)
+    # off: no check; warn: report grounding on the final event; strict: an
+    # answer with fabricated/missing citations or unsupported numbers is an error.
+    evidence_enforcement: Literal["off", "warn", "strict"] = "warn"
+    evidence_stale_seconds: int = Field(default=900, ge=1, le=604800)
     ssh_host: str = ""
     ssh_user: str = ""
     ssh_password: str = ""
