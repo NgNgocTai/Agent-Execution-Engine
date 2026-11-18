@@ -202,3 +202,43 @@ preserves old archives. Production startup still requires an explicit migration
 release job. New activation requires the current report and human approval;
 an older approved artifact without that evidence needs a reviewed new version.
 Fixture mode supports offline validation; paid review is rejected in fixture mode.
+
+Site capabilities and the data broker (P1-07)
+---------------------------------------------
+Built-in tools site_inventory(site, limit) and site_alarm_overview(site, limit)
+(services/site_capabilities.py). A site is an exact station id or an exact,
+case-insensitive station name (never a pattern). Order of operations: resolve
+the station, authorize the principal for it, and only then query devices and
+alarms. Queries are fixed backend templates: parameterized, read-only
+(inventory sessions are default_transaction_read_only with a 10 s statement
+timeout; alarm queries use max_execution_time 10 and LIMIT), at most 500
+devices and 100 alarms per call, with truncation flags. The ClickHouse/Postgres
+accounts should themselves be read-only.
+
+Row scope: auth principals accept an optional "sites" list (station ids or
+names, case-insensitive, "*" for all); admins see all. A principal without
+sites sees none. Restricted principals still cannot call the aggregate tools
+(alarm_statistics etc.); the two site tools are the scoped way in.
+
+Results that are different on purpose: SITE_NOT_FOUND, SITE_AMBIGUOUS (lists
+only sites the caller may see), SITE_FORBIDDEN (business errors),
+CONNECTOR_UNAVAILABLE (system error, no data), and success with data_status
+ok / no_devices / no_active_alarms. Every success carries provenance (sources,
+queried_at, observed_at null: retrieval time is not freshness).
+
+Brokered data for reviewed scripts: a run-spec may declare
+  "capability": "site_inventory" | "site_alarms", "capability_field": "<array input>"
+with a required string input "site" and a required array input named by
+capability_field (with a shape, e.g. maxItems 200) plus a sample_input holding
+sample records for the smoke test. The agent supplies only "site"; at runtime
+the backend authorizes the site, fetches records (limited to the field's
+maxItems), re-validates the whole input with the reviewed schema and passes it
+to the sandbox as JSON. The script never gets DSNs, passwords, SQL, SSH or
+network. capability/capability_field are part of the reviewed run-spec hash and
+the report, an LLM review cannot propose them, and scripts without them receive
+no data. A brokered skill is allowed for site-restricted principals because the
+broker enforces row scope; the data it returns is limited to their sites.
+
+Rollout: new built-in names change the pinned built-in catalog, so finish or
+cancel queued/waiting runs before deploying (as for migration 0010); old runs
+fail with "Built-in catalog changed" instead of silently gaining tools.
