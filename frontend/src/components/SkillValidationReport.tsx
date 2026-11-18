@@ -1,7 +1,7 @@
 export interface ValidationReport {
   policy_version?: string;
   ready_for_review?: boolean;
-  stages?: Array<{ stage: string; status: string; score?: number; domain_score?: number; reason?: string; keywords?: string[]; suspicious_points?: string[]; scripts?: unknown[]; budget?: unknown; origin?: string; script_count?: number; findings?: Array<{ path: string; line: number; code: string; message: string }>; error_code?: string }>;
+  stages?: Array<{ stage: string; status: string; score?: number; domain_score?: number; reason?: string; keywords?: string[]; suspicious_points?: string[]; scripts?: unknown[]; budget?: unknown; origin?: string; script_count?: number; findings?: Array<{ path: string; line: number; code: string; message: string }>; error_code?: string; notes?: string[]; inert_resources?: string[]; metadata?: Record<string, string[]> }>;
   scripts?: Array<{ path: string; hash: string; status: string; purpose: string; input_schema: unknown; sample_input: unknown; output_contract: string; output_schema?: unknown; timeout_seconds: number; error_code?: string; result?: unknown }>;
   stage?: string;
   status?: string;
@@ -20,6 +20,8 @@ export default function SkillValidationReport({ report }: { report: ValidationRe
       {stage.score !== undefined && <p>Taxonomy score: {stage.score}; matched: {stage.keywords?.join(", ") || "none"}</p>}
       {stage.domain_score !== undefined && <p>Domain score: {stage.domain_score}</p>}
       {stage.reason && <p className="whitespace-pre-wrap">{stage.reason}</p>}
+      {stage.notes?.map((note, index) => <p className="text-sm text-slate-700" key={index}>{note}</p>)}
+      {stage.inert_resources?.length ? <p className="text-xs">Inert resources: {stage.inert_resources.join(", ")}</p> : null}
       {stage.script_count !== undefined && <p>{stage.script_count} script(s) · {stage.origin}</p>}
       {stage.suspicious_points?.map((point, index) => <p className="text-amber-800" key={index}>{point}</p>)}
       {stage.scripts && <details><summary>LLM run-spec suggestions and usage estimate</summary><pre className="text-xs whitespace-pre-wrap max-h-80 overflow-auto">{JSON.stringify({ suggestions: stage.scripts, budget: stage.budget }, null, 2)}</pre></details>}
