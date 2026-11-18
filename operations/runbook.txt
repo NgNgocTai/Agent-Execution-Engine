@@ -352,3 +352,16 @@ over-estimate), LLM summaries of old context (a summarising model call adds cost
 a path where a summary could drop an approval or entity; the extractive excerpt
 stays), and an external prompt registry (prompts are pinned by hash per run since
 0010 and a remote registry would add a dependency that can block runs).
+
+Approval inbox
+--------------
+GET /api/approvals/pending (approver or admin) lists every live approval the caller
+may see across conversations: status pending and not expired, conversation not
+deleted, soonest expiry first, at most 200. Visibility follows conversation
+ownership (admins see all, others only their own). Each item has the waiting run_id
+(if any) and "actionable": whether the caller's host/service scope and the server
+allowlist would permit approving it. That flag is only a hint; the decision endpoint
+checks scope again. Details are redacted. The UI shows the inbox to approvers and
+admins, refreshes every 15 s and after run changes, and "Open" loads the
+conversation where the existing approve/reject controls are; there is no one-click
+approve from the inbox, so the operator always sees the full context first.
