@@ -77,6 +77,32 @@ def manifest_hash(manifest):
     ).hexdigest()
 
 
+def compatibility_stage(files):
+    """Explain what an imported package keeps, stores inertly or cannot do."""
+    from services.skill_markdown import agent_metadata
+
+    metadata = agent_metadata(files)
+    inert = sorted(path for path in files if path.endswith(".sh"))
+    notes = []
+    if inert:
+        notes.append(
+            "Shell files are stored as inert text resources and are never executed; "
+            "only declared Python scripts run, in the network-less sandbox."
+        )
+    if metadata:
+        notes.append(
+            "agents/*.yaml is descriptive metadata. It grants no tools, network, "
+            "connectors, credentials or approval."
+        )
+    return {
+        "stage": "compatibility",
+        "status": "passed",
+        "inert_resources": inert,
+        "metadata": metadata,
+        "notes": notes,
+    }
+
+
 def initial_report(manifest, files, digest):
     words = set(
         re.findall(
@@ -99,6 +125,7 @@ def initial_report(manifest, files, digest):
                 "file_count": len(files),
             },
             validate_sources(files),
+            compatibility_stage(files),
             {
                 "stage": "taxonomy",
                 "status": "passed" if matched else "review_required",

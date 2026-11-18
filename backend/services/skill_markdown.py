@@ -23,6 +23,43 @@ def mapping(loader, node):
 UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
 
 
+METADATA_PATH = re.compile(r"agents/[A-Za-z0-9_-]{1,40}\.ya?ml")
+
+
+def safe_yaml(text, limit=16384):
+    """Parse bounded YAML without aliases, anchors, tags or duplicate keys."""
+    if len(text) > limit:
+        raise ValueError("YAML metadata exceeds its size limit")
+    try:
+        tokens = list(yaml.scan(text))
+        if len(tokens) > 2000 or any(
+            isinstance(
+                token,
+                (yaml.tokens.AliasToken, yaml.tokens.AnchorToken, yaml.tokens.TagToken),
+            )
+            for token in tokens
+        ):
+            raise ValueError("YAML aliases, anchors and tags are unsupported")
+        return yaml.load(text, Loader=UniqueLoader)
+    except (yaml.YAMLError, RecursionError) as exc:
+        raise ValueError("Invalid YAML metadata") from exc
+
+
+def agent_metadata(files):
+    """Descriptive agents/*.yaml keys by path. Metadata never grants anything."""
+    found = {}
+    for path, text in files.items():
+        if not path.endswith((".yaml", ".yml")):
+            continue
+        if not METADATA_PATH.fullmatch(path):
+            raise ValueError("YAML is only supported as agents/<name>.yaml metadata")
+        data = safe_yaml(text)
+        if not isinstance(data, dict):
+            raise ValueError("Agent metadata must be a YAML mapping")
+        found[path] = sorted(str(key) for key in data)[:30]
+    return found
+
+
 def markdown_manifest(files):
     content = files.get("SKILL.md", "")
     match = re.fullmatch(r"---\s*\r?\n(.{1,8192}?)\r?\n---\s*\r?\n(.+)", content, re.S)

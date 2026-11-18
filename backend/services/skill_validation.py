@@ -27,6 +27,10 @@ from services.skill_schema import (
     validate_value,
 )
 
+# .sh files are stored as inert text resources; only declared Python entrypoints
+# ever execute. YAML is accepted solely as agents/<name>.yaml descriptive metadata.
+TEXT_SUFFIXES = {".py", ".json", ".md", ".txt", ".csv", ".sh"}
+METADATA_SUFFIXES = {".yaml", ".yml"}
 MAX_ARCHIVE = 2 * 1024 * 1024
 MAX_EXPANDED = 8 * 1024 * 1024
 
@@ -220,10 +224,11 @@ def inspect_archive(payload):
             if info.filename.casefold() in names:
                 raise ValueError("Archive contains case-colliding paths")
             names.add(info.filename.casefold())
+            suffix = path.suffix.lower()
             if (
-                path.suffix.lower() not in {".py", ".json", ".md", ".txt", ".csv"}
-                or info.filename in files
-            ):
+                suffix not in TEXT_SUFFIXES
+                and not (suffix in METADATA_SUFFIXES and path.parent.name == "agents")
+            ) or info.filename in files:
                 raise ValueError("Unsupported or duplicate archive entry")
             total += info.file_size
             if (
@@ -244,6 +249,9 @@ def inspect_archive(payload):
             files = {name[len(prefix) :]: value for name, value in files.items()}
     if "args.json" in files:
         raise ValueError("args.json is reserved for runtime arguments")
+    from services.skill_markdown import agent_metadata
+
+    agent_metadata(files)  # rejects misplaced or unsafe YAML metadata
     if "manifest.json" in files:
         manifest = Manifest.model_validate_json(files["manifest.json"])
     else:
