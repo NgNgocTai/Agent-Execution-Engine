@@ -11,6 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from repositories.models import Base
+from repositories.status_values import status_check
 
 
 class Run(Base):
@@ -40,6 +41,7 @@ class Run(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     __table_args__ = (
         UniqueConstraint("actor", "idempotency_key", name="uq_run_actor_key"),
+        status_check("runs"),
     )
 
 
@@ -63,6 +65,7 @@ class RunJob(Base):
     fencing_token: Mapped[int] = mapped_column(Integer, default=0)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     worker_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    __table_args__ = (status_check("run_jobs"),)
 
 
 class ToolExecution(Base):
@@ -78,6 +81,7 @@ class ToolExecution(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "call_id", name="uq_execution_run_call"),
         Index("ix_execution_run_status", "run_id", "status"),
+        status_check("tool_executions"),
     )
 
 
@@ -100,4 +104,7 @@ class RunStep(Base):
     usage: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    __table_args__ = (UniqueConstraint("run_id", "step_key", name="uq_run_step_key"),)
+    __table_args__ = (
+        UniqueConstraint("run_id", "step_key", name="uq_run_step_key"),
+        status_check("run_steps"),
+    )

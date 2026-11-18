@@ -3,6 +3,7 @@ from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from core.clock import utcnow
 from repositories.models import Base
+from repositories.status_values import status_check
 
 
 class SkillVersion(Base):
@@ -21,6 +22,7 @@ class SkillVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     __table_args__ = (
         UniqueConstraint("name", "version", name="uq_skill_name_version"),
+        status_check("skill_versions"),
     )
 
 

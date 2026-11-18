@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from repositories.status_values import status_check
 
 
 class Base(DeclarativeBase):
@@ -65,6 +66,7 @@ class PendingApproval(Base):
     __table_args__ = (
         UniqueConstraint("conversation_id", "call_id", name="uq_pending_approval_call"),
         Index("idx_pending_approvals_conversation", "conversation_id", "status"),
+        status_check("pending_approvals"),
     )
 
 
