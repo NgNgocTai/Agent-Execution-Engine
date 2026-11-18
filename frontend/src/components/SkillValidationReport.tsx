@@ -2,7 +2,7 @@ export interface ValidationReport {
   policy_version?: string;
   ready_for_review?: boolean;
   stages?: Array<{ stage: string; status: string; score?: number; domain_score?: number; reason?: string; keywords?: string[]; suspicious_points?: string[]; scripts?: unknown[]; budget?: unknown; origin?: string; script_count?: number; findings?: Array<{ path: string; line: number; code: string; message: string }>; error_code?: string }>;
-  scripts?: Array<{ path: string; hash: string; status: string; purpose: string; input_schema: unknown; sample_input: unknown; output_contract: string; timeout_seconds: number; error_code?: string; result?: unknown }>;
+  scripts?: Array<{ path: string; hash: string; status: string; purpose: string; input_schema: unknown; sample_input: unknown; output_contract: string; output_schema?: unknown; timeout_seconds: number; error_code?: string; result?: unknown }>;
   stage?: string;
   status?: string;
   findings?: Array<{ path: string; line: number; code: string; message: string }>;
@@ -30,7 +30,7 @@ export default function SkillValidationReport({ report }: { report: ValidationRe
       <p className="my-2">{script.purpose}</p><p>Output: {script.output_contract} · Timeout: {script.timeout_seconds}s</p>
       <p className="font-mono text-xs break-all my-2">SHA-256 {script.hash}</p>
       {script.error_code && <p className="text-red-700">{script.error_code}</p>}
-      <pre className="text-xs whitespace-pre-wrap max-h-80 overflow-auto p-2 bg-slate-50">{JSON.stringify({ input_schema: script.input_schema, sample_input: script.sample_input, smoke_result: script.result }, null, 2)}</pre>
+      <pre className="text-xs whitespace-pre-wrap max-h-80 overflow-auto p-2 bg-slate-50">{JSON.stringify({ input_schema: script.input_schema, output_schema: script.output_schema, sample_input: script.sample_input, smoke_result: script.result }, null, 2)}</pre>
     </details>)}
     <p className="text-sm mt-3">Static analysis and domain scores support review. Every executable script must pass its isolated smoke test and a different person must approve the package.</p>
   </section>;
