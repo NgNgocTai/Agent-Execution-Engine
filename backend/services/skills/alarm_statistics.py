@@ -170,22 +170,22 @@ class AlarmStatisticsSkill(BaseSkill):
                 group_col, where_clause, params, limit=top_n
             )
 
-            return SkillResult(
-                status=SkillStatus.SUCCESS,
-                data={
-                    "window_min": window_min,
-                    "group_by": group_by,
-                    "grouped_alarms": grouped_alarms,
-                    "total_alarms": total,
-                    "by_severity": by_severity,
-                    "by_error_code": by_error_code,
-                    "top_devices": top_devices,
-                    "active_alarms": active_count,
-                    "archived_alarms": archived_count,
-                    "domain_filter": domain or None,
-                    "severity_filter": severity or None,
-                },
-            )
+            data = {
+                "window_min": window_min,
+                "group_by": group_by,
+                "grouped_alarms": grouped_alarms,
+                "total_alarms": total,
+                "by_severity": by_severity,
+                "by_error_code": by_error_code,
+                "top_devices": top_devices,
+                "active_alarms": active_count,
+                "archived_alarms": archived_count,
+                "domain_filter": domain or None,
+                "severity_filter": severity or None,
+            }
+            if total == 0:
+                data.update(await self._empty_window_context(since))
+            return SkillResult(status=SkillStatus.SUCCESS, data=data)
         except Exception as e:
             logger.error("AlarmStatistics error: %s", e)
             return SkillResult(
@@ -193,6 +193,38 @@ class AlarmStatisticsSkill(BaseSkill):
                 data=None,
                 error=str(e),
             )
+
+    async def _empty_window_context(self, since):
+        """An empty window is not "no alarms": say where the source's data actually ends.
+
+        The newest time sits under a `time_created` key so the evidence layer treats it as
+        the observation time and adds its stale-data warning on its own.
+        """
+        newest_of = getattr(self.alarm_repo, "newest_alarm_time", None)
+        if newest_of is None:
+            return {}
+        try:
+            newest = await asyncio.to_thread(newest_of)
+        except Exception:
+            return {"empty_window_note": (
+                "Không có alarm trong cửa sổ, và không kiểm tra được bản ghi mới nhất của nguồn; "
+                "không được kết luận là mạng không có alarm."
+            )}
+        if newest is None:
+            return {"empty_window_note": "Nguồn alarm không có bản ghi nào."}
+        if newest.tzinfo is None:
+            newest = newest.replace(tzinfo=timezone.utc)
+        if newest >= since:
+            return {}  # data exists in the window; filters (severity/domain) excluded it
+        return {
+            "source_latest_alarm": {"time_created": newest.isoformat()},
+            "empty_window_note": (
+                f"Không có alarm trong cửa sổ {round((datetime.now(timezone.utc) - since).total_seconds() / 60)} "
+                f"phút, nhưng bản ghi mới nhất của toàn bộ nguồn là {newest.isoformat()}, cũ hơn cửa sổ. "
+                "Nguồn có thể là dữ liệu tĩnh hoặc đã ngừng cập nhật; không được kết luận là mạng không có alarm. "
+                "Hãy nêu thời điểm này cho người dùng."
+            ),
+        }
 
     async def _get_error_codes_by_domain(self, domain: str) -> list[str]:
         """Get error codes for a domain from PostgreSQL error table."""

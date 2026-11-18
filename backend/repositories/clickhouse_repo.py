@@ -91,6 +91,16 @@ class AlarmRepository:
             logger.error("ClickHouse count error: %s", e)
             raise RuntimeError("Alarm data source unavailable") from e
 
+    def newest_alarm_time(self):
+        """Event time of the newest record in the whole table, or None when it is empty."""
+        try:
+            result = self._query("SELECT count(), max(time_created) FROM alarm")
+            count, newest = result.result_rows[0]
+            return newest if count else None
+        except Exception as e:
+            logger.error("ClickHouse newest-time error: %s", e)
+            raise RuntimeError("Alarm data source unavailable") from e
+
     def group_alarms(
         self, group_col: str, where_clause: str, params: dict, limit: int = 0
     ) -> list[dict]:
