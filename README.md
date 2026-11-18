@@ -79,9 +79,8 @@ Framework đánh giá có hai nhóm:
 
 Kết quả gần nhất:
 
-- 17 backend Unit/Integration Tests OK.
-- 12 Contract/Integration Evals passed.
-- 20 End-to-End Workflow Evals passed.
+- 365 backend tests OK (34 skip khi thiếu PostgreSQL/Docker/SSH thật), lần chạy ngày 18/11/2026.
+- 12 Contract Evals, 16 Adversarial Evals và 20 End-to-End Workflow Evals passed (offline).
 - 11 Ragas frozen real snapshots executed successfully.
 
 ## Kiến trúc tổng quan
@@ -495,18 +494,18 @@ Kiểm tra:
 
 ## Trạng thái hiện tại
 
-- Backend tests: 17 OK.
-- Contract/Integration evals: 12 passed.
-- E2E workflow evals: 20 passed.
-- Frontend build: pass.
-- Ragas quality snapshots: 11 executed successfully trong lần chạy gần nhất được ghi nhận.
+Kết quả lần chạy gần nhất (18/11/2026, máy local); số liệu cập nhật được ghi trong `upgrade.md`:
+
+- Backend: 365 test OK, 34 skip khi thiếu PostgreSQL/Docker/SSH thật; Ruff pass.
+- Eval offline: 12 contract, 16 adversarial, 20 workflow passed.
+- Frontend: eslint, typecheck, 9 unit test, 13 Playwright E2E (fixture) pass.
+- Ragas quality snapshots: 11 executed successfully trong lần chạy gần nhất được ghi nhận (chưa chạy lại).
+- Chưa kiểm chứng: GitHub CI (chưa có PR nên chưa chạy), provider/ClickHouse/SSH thật, holdout NOC.
 
 ## Hướng phát triển
 
-- Thêm automated browser E2E bằng Playwright/Cypress cho chat, reload và approval.
-- Thêm auth, user/session isolation và audit log cho production.
-- Đưa deterministic evals vào CI hoặc pre-demo command bắt buộc.
-- Mở rộng Skill Manifest để kiểm tra đặc tả skill, schema và implementation.
-- Thêm provider fallback/retry và model routing theo loại tác vụ.
+- Nguồn KPI/link/topology/maintenance live và dữ liệu NOC có nhãn để hiệu chuẩn các skill triage (xem `operations/skill-packages.txt`).
+- SSO/JWKS thay cho bearer principal cấu hình sẵn; lọc dòng theo site cho alarm/inventory tổng hợp.
+- `@resource` và chọn model trên UI; chèn intervention giữa lúc một batch tool đang chạy.
 - Mở rộng Ragas dataset định kỳ, có hold-out set để tránh overfit prompt/model vào một bộ snapshot cố định.
 - Cân nhắc LangGraph hoặc workflow engine nếu agent flow phát triển thành nhiều branch/state phức tạp.
