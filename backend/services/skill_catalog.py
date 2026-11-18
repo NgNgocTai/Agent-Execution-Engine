@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import inspect
@@ -11,6 +12,15 @@ from services.skills.registry import SkillRegistry
 from services.skill_validation import inspect_archive, Manifest
 from services.sandbox_executor import execute_sandbox
 from services.skill_pipeline import manifest_hash
+from services.skill_guides import guide_tools
+
+BUILTIN_SKILL_NAMES = (
+    "noc_alarm_enrichment",
+    "device_inventory_lookup",
+    "alarm_statistics",
+    "node_health_remediate",
+)
+SHORT_DESCRIPTION = 600
 
 
 def builtin_manifest(skill):
@@ -116,6 +126,7 @@ class ScriptSkill(BaseSkill):
             sessions,
         )
         self.manifest, _ = resolved_manifest(record)
+        self.package_name = self.manifest.name
         from services.skill_pipeline import manifest_hash
 
         self.spec_digest = manifest_hash(self.manifest)
@@ -149,13 +160,14 @@ class ScriptSkill(BaseSkill):
 
     @property
     def description(self):
-        return (
-            self.manifest.description
-            + " "
-            + self.manifest.purpose
-            + " "
-            + self.manifest.instructions
-        )[:3000]
+        # Metadata only. Full SKILL.md and references are read on demand with
+        # load_skill/read_skill_file, so they are not cut off or duplicated here.
+        text = (self.manifest.description + " " + self.manifest.purpose)[
+            :SHORT_DESCRIPTION
+        ]
+        if self.manifest.instructions:
+            text += f" Call load_skill('{self.package_name}') for full instructions."
+        return text
 
     @property
     def parameters_schema(self):
@@ -182,6 +194,55 @@ class ScriptSkill(BaseSkill):
                 status=SkillStatus.SUCCESS, data={"instructions": manifest.instructions}
             )
         return await execute_sandbox(self.manifest, files, arguments)
+
+
+async def requestable_skill(session, name):
+    """A skill an operator may select: built-in or currently approved and active."""
+    if name in BUILTIN_SKILL_NAMES:
+        return True
+    return (
+        await session.scalar(
+            select(SkillVersion.id)
+            .join(SkillActivation, SkillActivation.version_id == SkillVersion.id)
+            .where(SkillVersion.status == "approved", SkillVersion.name == name)
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def _builtin_loader(skill, pin):
+    async def load():
+        manifest = await asyncio.to_thread(builtin_manifest, skill)
+        if manifest["content_hash"] != pin["hash"]:
+            raise ValueError("Built-in skill changed since this run was accepted")
+        text = manifest["instructions"] or (
+            skill.description
+            + "\n\nInput schema:\n"
+            + json.dumps(manifest["input_schema"], ensure_ascii=False)
+        )
+        return text, {"SKILL.md": text}
+
+    return load
+
+
+def _custom_loader(sessions, pin):
+    async def load():
+        async with sessions() as session:
+            record = await session.get(SkillVersion, pin["id"])
+            if (
+                not record
+                or record.status != "approved"
+                or record.content_hash != pin["hash"]
+            ):
+                raise ValueError("Pinned skill version was revoked or changed")
+            manifest, files = resolved_manifest(record)
+        if pin.get("spec_hash") and pin["spec_hash"] != manifest_hash(manifest):
+            raise ValueError("Pinned skill run-spec changed")
+        # Text files only: inspect_archive already limits packages to text types.
+        return manifest.instructions, dict(files)
+
+    return load
 
 
 async def registry_for_run(base, session, sessions, run):
@@ -248,4 +309,25 @@ async def registry_for_run(base, session, sessions, run):
                     from services.workflow.state import CheckpointIncompatible
                     raise CheckpointIncompatible("Legacy tool names exceed the provider limit; start a new run")
                 registry.register(skill)
+    loaders = {}
+    for name, pin in pins.items():
+        loaders[name] = (
+            _builtin_loader(base.get(name), pin)
+            if pin["kind"] == "builtin"
+            else _custom_loader(sessions, pin)
+        )
+    requested = getattr(run, "requested_skill", None)
+    if requested:
+        # Specific-skill runs only see that package's tools plus the readers.
+        if requested not in loaders:
+            raise ValueError("Requested skill is no longer available")
+        narrowed = SkillRegistry()
+        for name in registry.list_names():
+            skill = registry.get(name)
+            if getattr(skill, "package_name", skill.name) == requested:
+                narrowed.register(skill)
+        registry = narrowed
+        loaders = {requested: loaders[requested]}
+    for tool in guide_tools(loaders):
+        registry.register(tool)
     return registry

@@ -286,8 +286,10 @@ class PipelineApiTest(unittest.IsolatedAsyncioTestCase):
                 SkillRegistry(), session, self.sessions, run
             )
             await session.commit()
-        self.assertEqual(len(registry.list_names()), 2)
-        for name in registry.list_names():
+        names = [n for n in registry.list_names() if n not in {"load_skill", "read_skill_file"}]
+        self.assertEqual(len(names), 2)
+        self.assertIn("load_skill", registry.list_names())
+        for name in names:
             tool = registry.get(name)
             with patch(
                 "services.skill_catalog.execute_sandbox",

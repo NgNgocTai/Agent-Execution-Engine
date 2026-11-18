@@ -44,6 +44,12 @@ def plan(tool_name, arguments):
     actor = principal()
     if not actor.roles.intersection({"operator", "admin"}):
         return Decision.DENY
+    from services.skill_guides import GUIDE_TOOLS
+
+    if tool_name in GUIDE_TOOLS:
+        # Reads reviewed package text, never site data, so restricted
+        # principals may read the instructions they need to use a skill.
+        return Decision.ALLOW
     if tool_name != "node_health_remediate":
         # Aggregate inventory/alarm connectors do not yet expose a row-scope
         # filter. Deny restricted principals instead of leaking other sites.
