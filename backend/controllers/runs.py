@@ -72,6 +72,15 @@ async def list_runs(conversation_id: str, limit: int = Query(20, ge=1, le=100)):
         return {"runs": [public_run(run) for run in runs]}
 
 
+@router.get("/approvals/pending")
+async def approval_inbox(limit: int = Query(100, ge=1, le=200)):
+    """Every live approval the caller may decide, across their conversations."""
+    require("approver")
+    async with async_session() as session:
+        items = await ApprovalRepository(session).list_pending_for_actor(limit)
+    return {"approvals": redact(items)}
+
+
 @router.get("/runs/options")
 async def run_options():
     """Skills an operator may select. Declared before /runs/{run_id}."""

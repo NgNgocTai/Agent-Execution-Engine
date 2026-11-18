@@ -120,6 +120,57 @@ class ApprovalRepository:
         )
         return [self.to_dict(approval) for approval in result.scalars()]
 
+    async def list_pending_for_actor(self, limit: int = 100) -> list[dict]:
+        """Live approvals in conversations the caller may see, soonest expiry first.
+
+        Ownership follows ConversationRepository.get: admins see all, everyone
+        else only their own conversations. actionable says whether the caller's
+        host/service scope would let them approve it; the decision endpoint
+        checks this again, so the flag is a hint, never an authorization.
+        """
+        from core.auth import principal
+        from core.policy import target_allowed
+        from repositories.models import Conversation
+        from repositories.run_models import Run
+
+        actor = principal()
+        query = (
+            select(PendingApproval, Conversation.title)
+            .join(Conversation, Conversation.id == PendingApproval.conversation_id)
+            .where(
+                PendingApproval.status == "pending",
+                PendingApproval.expires_at > _utcnow(),
+                Conversation.deleted_at.is_(None),
+            )
+            .order_by(PendingApproval.expires_at, PendingApproval.id)
+            .limit(limit)
+        )
+        if "admin" not in actor.roles:
+            query = query.where(Conversation.owner_id == actor.subject)
+        rows = (await self.session.execute(query)).all()
+        runs = {}
+        if rows:
+            waiting = await self.session.execute(
+                select(Run.conversation_id, Run.id).where(
+                    Run.conversation_id.in_({row[0].conversation_id for row in rows}),
+                    Run.status == "waiting_approval",
+                )
+            )
+            runs = dict(waiting.all())
+        items = []
+        for approval, title in rows:
+            item = self.to_dict(approval)
+            metadata = item["approval"]
+            item.update(
+                conversation_title=title,
+                run_id=runs.get(approval.conversation_id),
+                actionable=target_allowed(
+                    metadata.get("host", ""), metadata.get("service", ""), write=True
+                ),
+            )
+            items.append(item)
+        return items
+
     async def resolve(
         self,
         approval: PendingApproval,
