@@ -248,3 +248,25 @@ answer. strict is opt-in: a number the model derived itself (a sum, a ratio) is
 reported as unsupported, which is intended. This catches fabricated references and
 invented figures; it cannot judge reasoning quality, so it is not a groundedness
 certification. That still needs a labelled holdout reviewed by NOC staff.
+
+Adversarial evals (P2-06)
+-------------------------
+python -m evals.adversarial (also a CI step and part of scripts/run_eval_suite.ps1)
+runs 16 fixed, labelled attacks from backend/evals/cases/adversarial_cases.json
+against the REAL engine, executor, policy, validators and skills with scripted
+"naive" models that obey the attack. Each case scores the trace AND counted side
+effects (SSH commands dispatched, database queries, sandbox runs, approvals),
+never only the model's text. Categories: tool-output injection, skill-reference
+injection, cross-site read (by id, by name, aggregate tool, brokered script),
+schema explosion (deep/wide/NaN/extra field), secret leakage, truncated or
+filtered output with a tool call, bypass of the load-instructions gate and a
+fabricated-evidence answer. Offline: no network, no credentials, no model, no
+upload; the dataset is versioned with the code. tests/test_adversarial.py also
+runs mutation checks: removing approval gating, site authorization, redaction,
+the instruction gate or schema validation must turn the matching case red.
+Writing this suite found a real gap, now fixed: output redaction did not mask
+unlabelled credentials such as sk-... API keys, AWS access key ids, GitHub and
+Slack tokens, JWTs or "my password is X". Not covered here (needs opt-in budget
+and a model): generated red-team prompts against a live model, SSE lag/p95
+latency, dependency fault injection and rollback rehearsal. Those stay separate
+release gates. Approval replay and worker fencing are covered by their own tests.
