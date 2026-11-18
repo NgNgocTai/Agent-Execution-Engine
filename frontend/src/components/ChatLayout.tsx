@@ -5,6 +5,7 @@ import Header from "./Header";
 import ReasoningTrace from "./ReasoningTrace";
 import ChatInput from "./ChatInput";
 import RunHistory from "./RunHistory";
+import ApprovalInbox from "./ApprovalInbox";
 import RunStatus from "./RunStatus";
 import { useChat } from "../hooks/useChat";
 import {
@@ -53,6 +54,7 @@ export default function ChatLayout() {
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
   const [providers, setProviders] = useState<ProviderOption[]>(DEFAULT_PROVIDERS);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isApprover, setIsApprover] = useState(false);
 
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
@@ -106,6 +108,7 @@ export default function ChatLayout() {
         if (cancelled || !config.providers.length) return;
         const nextProviders = config.providers.map(toProviderOption);
         setIsAdmin(config.actor?.roles.includes("admin") || false);
+        setIsApprover(Boolean(config.actor?.roles.some(role => role === "admin" || role === "approver")));
         setProviders(nextProviders);
         if (!conversationId && !isStreaming && !config.providers.includes(currentProvider)) {
           switchProvider(config.providers[0]);
@@ -158,6 +161,7 @@ export default function ChatLayout() {
           conversationId={conversationId}
           providers={providers}
         />
+        <ApprovalInbox enabled={isApprover} refreshKey={`${activeRun?.run_id ?? ""}:${runStatus ?? ""}`} onOpen={loadConversation} />
 
         <main ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-6">
           <div className="max-w-[800px] mx-auto space-y-8">
