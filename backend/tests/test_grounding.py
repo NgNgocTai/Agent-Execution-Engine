@@ -184,3 +184,28 @@ class EngineEnforcementTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecordAgeTest(unittest.TestCase):
+    def test_old_newest_record_is_reported_with_its_age_and_a_warning(self):
+        old = (NOW - timedelta(days=140)).strftime("%Y-%m-%d %H:%M:%S")
+        facts = observation({"alarms": [{"time_created": old}]}, NOW)
+        self.assertEqual(facts["observed_age_seconds"], 140 * 86400)
+        self.assertEqual(facts["freshness"], "unknown")
+        self.assertTrue(any("140 day(s) old" in w and "do not present" in w for w in facts["warnings"]))
+
+    def test_recent_records_have_an_age_but_no_staleness_warning(self):
+        recent = (NOW - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        facts = observation({"alarms": [{"time_created": recent}]}, NOW)
+        self.assertEqual(facts["observed_age_seconds"], 600)
+        self.assertFalse(any("day(s) old" in w for w in facts["warnings"]))
+
+    def test_no_age_without_a_time_or_with_a_skewed_one(self):
+        self.assertIsNone(observation({"rows": [{"x": 1}]}, NOW)["observed_age_seconds"])
+        future = (NOW + timedelta(hours=3)).isoformat()
+        self.assertIsNone(observation({"a": [{"time_created": future}]}, NOW)["observed_age_seconds"])
+
+    def test_evidence_record_exposes_the_age(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+        record = evidence(Skill(), {}, {"alarms": [{"time_created": old}]})
+        self.assertGreaterEqual(record["observed_age_seconds"], 3 * 86400 - 5)

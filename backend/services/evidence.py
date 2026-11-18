@@ -10,6 +10,7 @@ EVENT_TIME_KEYS = {"time_created", "observed_at", "timestamp", "event_time"}
 AS_OF_KEY = "as_of"  # an explicit "this snapshot reflects the source at ..." time
 MAX_NODES, MAX_DEPTH, MAX_FIELDS = 5000, 6, 20
 FUTURE_TOLERANCE = timedelta(minutes=2)
+OLD_RECORDS_AFTER = timedelta(hours=24)
 
 
 def parse_time(value):
@@ -53,7 +54,7 @@ def _scan(data):
 def observation(data, retrieved):
     """Event-time facts and an honest freshness verdict for a tool result."""
     events, as_of, records, fields = _scan(data)
-    warnings, freshness, basis, observed, skew = [], "unknown", None, None, False
+    warnings, freshness, basis, observed, skew, age_seconds = [], "unknown", None, None, False, None
     if as_of:
         observed, basis = max(as_of), "source_as_of"
         age = (retrieved - observed).total_seconds()
@@ -71,9 +72,17 @@ def observation(data, retrieved):
         if observed > retrieved + FUTURE_TOLERANCE:
             skew = True
             warnings.append("A record time is in the future: clock skew suspected")
+        age = retrieved - observed
+        if not skew:
+            age_seconds = max(0, int(age.total_seconds()))
         warnings.append(
             "observed_at is the newest record event time; it does not prove the source is current"
         )
+        if not skew and age > OLD_RECORDS_AFTER:
+            warnings.append(
+                f"The newest record is {age.days} day(s) old. If this source should be live, "
+                "it may be stale or stopped; do not present these records as current."
+            )
     else:
         warnings.append(
             "No source observation time in the result; retrieval time is not freshness proof"
@@ -82,6 +91,7 @@ def observation(data, retrieved):
         "observed_at": observed.isoformat() if observed else None,
         "observed_basis": basis,
         "oldest_event_at": min(events).isoformat() if events else None,
+        "observed_age_seconds": age_seconds,
         "freshness": freshness,
         "clock_skew_suspected": skew,
         "record_count": records,
@@ -99,7 +109,7 @@ def evidence(skill, arguments, data):
     return {"evidence_id": "ev_" + hashlib.sha256(payload.encode()).hexdigest()[:20],
             "source": "fixture:" + source if fixture else source,
             "retrieved_at": retrieved.isoformat(),
-            **{key: facts[key] for key in ("observed_at", "observed_basis", "oldest_event_at", "freshness", "clock_skew_suspected", "record_count", "fields")},
+            **{key: facts[key] for key in ("observed_at", "observed_basis", "observed_age_seconds", "oldest_event_at", "freshness", "clock_skew_suspected", "record_count", "fields")},
             "entity": arguments.get("host") or arguments.get("site") or arguments.get("device_id") or arguments.get("ip_address") or arguments.get("device_name"),
             "time_window_minutes": arguments.get("window_min"),
             "warnings": facts["warnings"]}
