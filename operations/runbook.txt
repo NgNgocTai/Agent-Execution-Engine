@@ -224,3 +224,27 @@ by the control database only, so a data outage does not restart pods);
 GET /api/operations/connectors (viewer/operator/approver) returns the same
 measured state. Probes are cached 30 s. No demo or fixture data replaces a
 failed live source; fixture data_mode is an explicit separate setting.
+
+Evidence and answer grounding (P2-02)
+-------------------------------------
+Tool evidence now carries observed_at, observed_basis, oldest_event_at, freshness,
+clock_skew_suspected, record_count and field names (services/evidence.py).
+- observed_at is the NEWEST RECORD EVENT TIME (time_created/observed_at/timestamp/
+  event_time; naive times are read as UTC). It is never the retrieval time and it
+  does not prove the source is current: a quiet network has old alarms and an
+  outage also has none. Hence freshness stays "unknown" unless a result carries an
+  explicit as_of (source snapshot time): then fresh/stale is judged against
+  EVIDENCE_STALE_SECONDS (default 900). Times more than 2 minutes in the future set
+  clock_skew_suspected and never count as fresh. No time at all => observed_at null.
+- evidence_id is a hash of the payload, so identical data gives the same id.
+Final answers are checked deterministically (services/grounding.py) against THIS
+run's tool messages: cited ev_ ids must have been returned by a successful tool
+call; the answer must cite when evidence exists; numbers with two or more digits
+(or a decimal part) must appear in tool results or the user's request.
+Statuses: grounded, not_applicable, uncited, invalid_citation, unsupported_numbers.
+EVIDENCE_ENFORCEMENT=off|warn|strict (default warn): warn adds "grounding" to the
+final_answer event; strict ends the run with error ANSWER_UNGROUNDED and no final
+answer. strict is opt-in: a number the model derived itself (a sum, a ratio) is
+reported as unsupported, which is intended. This catches fabricated references and
+invented figures; it cannot judge reasoning quality, so it is not a groundedness
+certification. That still needs a labelled holdout reviewed by NOC staff.
