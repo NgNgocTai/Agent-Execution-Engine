@@ -56,6 +56,9 @@ async def startup():
     from controllers.chat import _get_provider
     engine, resources = await create_runtime()
     app.state.resources = resources
+    from services.connectors import ConnectorHub
+
+    app.state.hub = next((r for r in resources if isinstance(r, ConnectorHub)), None)
     set_engine(engine)
     app.state.worker = None
     app.state.worker_task = None
@@ -108,4 +111,9 @@ async def ready():
                 await connection.execute(text("SELECT 1"))
     except Exception:
         raise HTTPException(503, "Control database is unavailable") from None
-    return {"status": "ready"}
+    # Data sources never gate readiness (the control database does); their
+    # measured state is reported so an outage is visible, not hidden.
+    hub = getattr(app.state, "hub", None)
+    sources = await hub.probe() if hub else {}
+    degraded = any(s["state"] == "unavailable" for s in sources.values())
+    return {"status": "degraded" if degraded else "ready", "sources": sources}

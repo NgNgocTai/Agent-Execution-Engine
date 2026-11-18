@@ -15,15 +15,11 @@ async def create_runtime():
         from evals.runner import build_registry
         registry = build_registry()
         return AgentEngine(ToolExecutor(registry), registry), []
-    from repositories.clickhouse_repo import AlarmRepository
-    from repositories.postgres_repo import DeviceRepository
-    alarms = await asyncio.to_thread(AlarmRepository)
-    devices = DeviceRepository()
-    try:
-        await devices.connect()
-    except BaseException:
-        await asyncio.to_thread(alarms.close)
-        raise
+    from services.connectors import ConnectorHub
+
+    # Sources connect lazily and fail independently; startup never waits on them.
+    hub = ConnectorHub()
+    alarms, devices = hub.alarms, hub.devices
     registry = SkillRegistry()
     for skill in (NocAlarmEnrichmentSkill(alarms, devices),
                   AlarmStatisticsSkill(alarms, devices), DeviceInventoryLookupSkill(alarms, devices)):
@@ -36,7 +32,7 @@ async def create_runtime():
             raise ValueError("Configured SSH trust store is unavailable")
         registry.register(NodeHealthRemediateSkill())
     tracer = LangfuseTracer()
-    return AgentEngine(ToolExecutor(registry), registry, tracer), [alarms, devices, tracer]
+    return AgentEngine(ToolExecutor(registry), registry, tracer), [hub, tracer]
 
 
 async def close_runtime(resources):

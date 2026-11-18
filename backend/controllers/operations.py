@@ -1,7 +1,7 @@
 import json
 from datetime import timedelta
 from typing import Literal
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select, func, update
 from core.auth import require
@@ -40,6 +40,15 @@ def require_dispatch_window_closed(approval):
             409,
             f"Wait {math.ceil(remaining)} seconds for the possible dispatch window to close, then verify the remote outcome again",
         )
+
+
+@router.get("/connectors")
+async def connectors(request: Request):
+    require("viewer", "operator", "approver")
+    hub = getattr(request.app.state, "hub", None)
+    if hub is None:
+        return {"sources": {}, "note": "No live data sources in this data mode"}
+    return {"sources": await hub.probe()}
 
 
 @router.get("/metrics")
