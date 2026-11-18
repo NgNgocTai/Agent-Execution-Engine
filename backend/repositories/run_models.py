@@ -1,6 +1,7 @@
 from core.clock import utcnow
 from datetime import datetime
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -11,7 +12,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from repositories.models import Base
-from repositories.status_values import status_check
+from repositories.status_values import INTERVENTION, check_sql, status_check
 
 
 class Run(Base):
@@ -78,10 +79,26 @@ class ToolExecution(Base):
     status: Mapped[str] = mapped_column(String(30))
     is_write: Mapped[bool] = mapped_column(default=False)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    skill_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     __table_args__ = (
         UniqueConstraint("run_id", "call_id", name="uq_execution_run_call"),
         Index("ix_execution_run_status", "run_id", "status"),
         status_check("tool_executions"),
+    )
+
+
+class RunIntervention(Base):
+    __tablename__ = "run_interventions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("runs.id"), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    __table_args__ = (
+        CheckConstraint(check_sql(INTERVENTION), name="ck_run_interventions_status"),
     )
 
 

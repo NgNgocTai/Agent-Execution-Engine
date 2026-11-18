@@ -134,7 +134,7 @@ class StatusConstraintTest(unittest.TestCase):
         import re
         from repositories import status_values as values
 
-        allowed = set().union(*map(set, values.CONSTRAINED.values()))
+        allowed = set().union(*map(set, values.CONSTRAINED.values()), values.INTERVENTION)
         root = Path(__file__).resolve().parents[1]
         pattern = re.compile(r"""(?:status\s*=\s*|\.values\(status=|Status\.in_\(\[)\s*["']([a-z_]+)["']""")
         # Literals that look like statuses but are not values of a constrained column:

@@ -34,6 +34,10 @@ APPROVAL = (
 )
 SKILL_VERSION = ("quarantined", "approved", "rejected", "revoked")
 
+# pending: accepted, not yet shown to the model. delivered: injected after a tool
+# batch. undelivered: the run ended first, so the instruction was never applied.
+INTERVENTION = ("pending", "delivered", "undelivered")
+
 CONSTRAINED = {
     "runs": RUN,
     "run_jobs": JOB,
