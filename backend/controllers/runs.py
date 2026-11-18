@@ -71,6 +71,36 @@ async def list_runs(conversation_id: str, limit: int = Query(20, ge=1, le=100)):
         return {"runs": [public_run(run) for run in runs]}
 
 
+@router.get("/runs/options")
+async def run_options():
+    """Skills an operator may select. Declared before /runs/{run_id}."""
+    require("viewer", "operator", "approver")
+    from controllers import chat
+    from repositories.skill_models import SkillActivation, SkillVersion
+    from services.skill_catalog import BUILTIN_SKILL_NAMES
+
+    skills = [{"name": "auto", "kind": "auto", "description": "The agent chooses from every approved skill"}]
+    registry = getattr(getattr(chat, "engine", None), "skill_registry", None)
+    for name in BUILTIN_SKILL_NAMES:
+        skill = registry.get(name) if registry else None
+        if skill is not None:
+            skills.append({"name": name, "kind": "builtin", "description": skill.description[:240]})
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(SkillVersion)
+                .join(SkillActivation, SkillActivation.version_id == SkillVersion.id)
+                .where(SkillVersion.status == "approved")
+                .order_by(SkillVersion.name)
+            )
+        ).scalars()
+        for record in rows:
+            manifest = json.loads(record.manifest)
+            skills.append({"name": record.name, "kind": "custom", "version": record.version,
+                           "description": str(manifest.get("description", ""))[:240]})
+    return {"skills": skills}
+
+
 @router.get("/runs/{run_id}")
 async def snapshot(run_id: str):
     require("viewer", "operator", "approver")

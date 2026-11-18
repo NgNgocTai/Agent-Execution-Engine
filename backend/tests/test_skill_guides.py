@@ -463,3 +463,45 @@ class RunAdmissionTest(GuideFixture):
         from services.run_service import public_run
 
         self.assertEqual(public_run(run)["skill"], "auto")
+
+
+class RunOptionsTest(GuideFixture):
+    async def get(self, path="/api/runs/options", roles=("operator",)):
+        import httpx
+        from fastapi import FastAPI
+        from unittest.mock import patch as _patch
+        from controllers import chat, runs as routes
+        from services.skills.base import BaseSkill, SkillResult, SkillStatus
+
+        class Tool(BaseSkill):
+            parameters_schema = {"type": "object", "properties": {}}
+            name = "alarm_statistics"
+            description = "Alarm statistics " + "x" * 400
+
+            async def execute(self, **kwargs):
+                return SkillResult(status=SkillStatus.SUCCESS, data={})
+
+        registry = SkillRegistry()
+        registry.register(Tool())
+        app = FastAPI()
+        app.include_router(routes.router)
+        token = _principal.set(Principal("p", frozenset(roles), frozenset(), frozenset(), frozenset()))
+        self.addCleanup(_principal.reset, token)
+        with _patch.object(routes, "async_session", self.sessions), _patch.object(chat, "engine", NS(skill_registry=registry)):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+                return await client.get(path)
+
+    async def test_options_list_auto_registered_builtins_and_active_approved_packages(self):
+        await self.add_version("v1", package(name="alpha-skill"))
+        await self.add_version("v2", package(name="idle-skill"), status="quarantined", activate=False)
+        response = await self.get()
+        self.assertEqual(response.status_code, 200)
+        skills = response.json()["skills"]
+        self.assertEqual([s["name"] for s in skills], ["auto", "alarm_statistics", "custom_alpha_skill"])
+        self.assertEqual([s["kind"] for s in skills], ["auto", "builtin", "custom"])
+        self.assertLessEqual(len(skills[1]["description"]), 240)
+        self.assertEqual(skills[2]["version"], "1.0.0")
+
+    async def test_options_route_is_not_captured_by_the_run_id_route_and_needs_a_role(self):
+        self.assertEqual((await self.get()).status_code, 200)
+        self.assertEqual((await self.get(roles=("guest",))).status_code, 403)
