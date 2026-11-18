@@ -87,6 +87,27 @@ Exit failure, malformed/non-finite JSON, privileged approval requests or output
 overflow fail validation. An exit-zero result does not override an invalid
 contract. Every script must pass its own sample input in the real sandbox.
 
+Imported package compatibility
+------------------------------
+Accepted entries: .py .json .md .txt .csv, .sh as an INERT text resource, and
+YAML only as agents/<name>.yaml descriptive metadata (16 KB, no aliases/anchors/
+tags/duplicate keys, must be a mapping). Any other file type, nested YAML or
+binary is rejected. Shell files are stored and readable through read_skill_file
+but are never executed: only declared Python entrypoints run in the sandbox, and
+a .sh or .yaml file cannot be an entrypoint. Secret scanning covers all files.
+The report gains a "compatibility" stage listing inert resources, metadata keys
+and what the metadata does not grant. Metadata never gives tools, network,
+connectors, credentials or approval. Import success is not run success: every
+script still needs its smoke test and a different reviewer.
+
+Checked against the reference project's packages (Agent_skill/*.zip):
+ran-kpi-anomaly-triage and core-link-impact-summary now import (script plus
+agents/openai.yaml; they have no runtime.json, so default run-spec is used and
+real KPI inputs need a reviewed runtime.json). node-health-autoremediate,
+unsafe-node-debug-shell, noc-alarm-enrichment and db-schema-discovery are still
+rejected by static analysis (process, shell or database access); that is
+intended, not a compatibility gap to close.
+
 Reading instructions on demand
 ------------------------------
 Tool descriptions in the catalog are short (description + purpose, at most 600
