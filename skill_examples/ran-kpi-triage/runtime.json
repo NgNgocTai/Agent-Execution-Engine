@@ -1,0 +1,58 @@
+{
+  "scripts": [{
+    "entrypoint": "scripts/triage_ran_kpis.py",
+    "purpose": "Rank RAN cell KPI anomalies from operator-supplied KPI records",
+    "timeout_seconds": 10,
+    "output_contract": "json",
+    "input_fields": [
+      {"name": "records", "kind": "array", "shape": {
+        "type": "array", "minItems": 1, "maxItems": 200,
+        "items": {"type": "object", "required": ["cell_id"],
+          "properties": {
+            "cell_id": {"type": "string", "minLength": 1, "maxLength": 100},
+            "site_id": {"type": "string", "minLength": 1, "maxLength": 100},
+            "node": {"type": "string", "minLength": 1, "maxLength": 100},
+            "observed_at": {"type": "string", "minLength": 1, "maxLength": 40},
+            "availability_pct": {"type": "number", "minimum": 0, "maximum": 100},
+            "drop_rate_pct": {"type": "number", "minimum": 0, "maximum": 100},
+            "latency_ms": {"type": "number", "minimum": 0, "maximum": 600000},
+            "packet_loss_pct": {"type": "number", "minimum": 0, "maximum": 100},
+            "throughput_mbps": {"type": "number", "minimum": 0, "maximum": 1000000},
+            "affected_subscribers": {"type": "integer", "minimum": 0, "maximum": 100000000},
+            "alarm_count": {"type": "integer", "minimum": 0, "maximum": 100000}}}}}
+    ],
+    "sample_input": {"records": [
+      {"cell_id": "CELL-A1", "site_id": "SITE-A", "observed_at": "2026-11-17T10:00:00Z", "availability_pct": 96.2, "drop_rate_pct": 4.8, "latency_ms": 112, "packet_loss_pct": 2.4, "throughput_mbps": 18, "affected_subscribers": 840, "alarm_count": 5},
+      {"cell_id": "CELL-B1", "site_id": "SITE-B", "observed_at": "2026-11-17T10:00:00Z", "availability_pct": 99.1, "drop_rate_pct": 1.1, "latency_ms": 42, "packet_loss_pct": 0.3, "throughput_mbps": 88, "affected_subscribers": 120, "alarm_count": 1},
+      {"cell_id": "CELL-C1", "site_id": "SITE-C", "availability_pct": 99.5}]},
+    "output_schema": {
+      "type": "object",
+      "required": ["calibration", "input_source", "interpretation", "summary", "ranked_cells", "warnings"],
+      "properties": {
+        "calibration": {"type": "string", "maxLength": 40},
+        "input_source": {"type": "string", "enum": ["operator_supplied"]},
+        "interpretation": {"type": "string", "maxLength": 300},
+        "summary": {"type": "object", "required": ["total_cells", "severity_counts"],
+          "properties": {
+            "total_cells": {"type": "integer", "minimum": 0},
+            "severity_counts": {"type": "object", "required": ["critical", "major", "minor", "normal", "insufficient_data"],
+              "properties": {
+                "critical": {"type": "integer"}, "major": {"type": "integer"}, "minor": {"type": "integer"},
+                "normal": {"type": "integer"}, "insufficient_data": {"type": "integer"}}},
+            "top_site_by_total_score": {"type": "string", "maxLength": 100}}},
+        "ranked_cells": {"type": "array", "maxItems": 50, "items": {"type": "object",
+          "required": ["cell_id", "score", "severity", "kpis_reported", "drivers", "recommended_actions"],
+          "properties": {
+            "cell_id": {"type": "string", "maxLength": 100},
+            "site_id": {"type": "string", "maxLength": 100},
+            "node": {"type": "string", "maxLength": 100},
+            "score": {"type": "number", "minimum": 0, "maximum": 100},
+            "severity": {"type": "string", "enum": ["critical", "major", "minor", "normal", "insufficient_data"]},
+            "kpis_reported": {"type": "integer", "minimum": 0, "maximum": 6},
+            "drivers": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 200}},
+            "recommended_actions": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 200}}}}},
+        "newest_observed_at": {"type": "string", "maxLength": 40},
+        "oldest_observed_at": {"type": "string", "maxLength": 40},
+        "warnings": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 200}}}}
+  }]
+}

@@ -1,0 +1,67 @@
+{
+  "scripts": [{
+    "entrypoint": "scripts/summarize_link_impact.py",
+    "purpose": "Rank core and transport link impact from operator-supplied alarm and KPI records",
+    "timeout_seconds": 10,
+    "output_contract": "json",
+    "input_fields": [
+      {"name": "records", "kind": "array", "shape": {
+        "type": "array", "minItems": 1, "maxItems": 200,
+        "items": {"type": "object", "required": ["link_id", "severity"],
+          "properties": {
+            "link_id": {"type": "string", "minLength": 1, "maxLength": 100},
+            "severity": {"type": "string", "minLength": 1, "maxLength": 32},
+            "alarm_id": {"type": "string", "minLength": 1, "maxLength": 64},
+            "site_id": {"type": "string", "minLength": 1, "maxLength": 100},
+            "device": {"type": "string", "minLength": 1, "maxLength": 100},
+            "interface": {"type": "string", "minLength": 1, "maxLength": 100},
+            "service": {"type": "string", "minLength": 1, "maxLength": 100},
+            "timestamp": {"type": "string", "minLength": 1, "maxLength": 40},
+            "latency_ms": {"type": "number", "minimum": 0, "maximum": 600000},
+            "packet_loss_pct": {"type": "number", "minimum": 0, "maximum": 100},
+            "throughput_mbps": {"type": "number", "minimum": 0, "maximum": 1000000}}}}}
+    ],
+    "sample_input": {"records": [
+      {"alarm_id": "A-1", "link_id": "LINK-1", "site_id": "SITE-A", "device": "R1", "interface": "xe-0/0/1", "severity": "critical", "service": "mobile-data", "latency_ms": 145, "packet_loss_pct": 4.1, "throughput_mbps": 120, "timestamp": "2026-11-17T10:02:00Z"},
+      {"alarm_id": "A-2", "link_id": "LINK-1", "site_id": "SITE-B", "device": "R2", "interface": "xe-1/0/2", "severity": "major", "service": "voice", "latency_ms": 132, "packet_loss_pct": 2.8, "throughput_mbps": 95, "timestamp": "2026-11-17T10:03:00Z"},
+      {"alarm_id": "A-3", "link_id": "LINK-2", "site_id": "SITE-C", "severity": "minor", "service": "enterprise-vpn"}]},
+    "output_schema": {
+      "type": "object",
+      "required": ["calibration", "input_source", "interpretation", "summary", "impacts", "warnings"],
+      "properties": {
+        "calibration": {"type": "string", "maxLength": 40},
+        "input_source": {"type": "string", "enum": ["operator_supplied"]},
+        "interpretation": {"type": "string", "maxLength": 300},
+        "summary": {"type": "object", "required": ["total_records", "link_count", "severity_counts"],
+          "properties": {
+            "total_records": {"type": "integer", "minimum": 0},
+            "link_count": {"type": "integer", "minimum": 0},
+            "top_link": {"type": "string", "maxLength": 100},
+            "severity_counts": {"type": "object", "required": ["critical", "major", "minor", "warning", "normal", "unknown"],
+              "properties": {
+                "critical": {"type": "integer"}, "major": {"type": "integer"}, "minor": {"type": "integer"},
+                "warning": {"type": "integer"}, "normal": {"type": "integer"}, "unknown": {"type": "integer"}}}}},
+        "impacts": {"type": "array", "maxItems": 50, "items": {"type": "object",
+          "required": ["link_id", "impact_score", "impact_level", "record_count", "severity_counts", "drivers", "recommendations"],
+          "properties": {
+            "link_id": {"type": "string", "maxLength": 100},
+            "impact_score": {"type": "number", "minimum": 0, "maximum": 100},
+            "impact_level": {"type": "string", "enum": ["high", "medium", "low", "none_observed", "insufficient_data"]},
+            "record_count": {"type": "integer", "minimum": 0},
+            "severity_counts": {"type": "object", "properties": {
+              "critical": {"type": "integer"}, "major": {"type": "integer"}, "minor": {"type": "integer"},
+              "warning": {"type": "integer"}, "normal": {"type": "integer"}, "unknown": {"type": "integer"}}},
+            "site_count": {"type": "integer", "minimum": 0},
+            "sites": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 100}},
+            "service_count": {"type": "integer", "minimum": 0},
+            "services": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 100}},
+            "devices": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 100}},
+            "interfaces": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 100}},
+            "alarm_ids": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 64}},
+            "drivers": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 200}},
+            "recommendations": {"type": "array", "maxItems": 6, "items": {"type": "string", "maxLength": 200}}}}},
+        "newest_timestamp": {"type": "string", "maxLength": 40},
+        "oldest_timestamp": {"type": "string", "maxLength": 40},
+        "warnings": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 200}}}}
+  }]
+}
