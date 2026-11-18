@@ -293,3 +293,23 @@ delete it and, if it came from production, whether to treat its history as expos
 (deleting does not remove it from Git history; rewriting history or rotating
 credentials is a separate decision). *.dump is now git-ignored so new dumps are not
 committed, but the existing tracked file is untouched.
+
+Skill selection and run history in the UI (P2-03)
+-------------------------------------------------
+GET /api/runs/options (viewer/operator/approver) lists what the server will accept:
+"auto", built-in skills registered in this deployment, and approved AND active
+custom packages. The chat input shows a Skill selector only when there is something
+to choose. Auto is sent by omitting "skill"; a chosen skill is validated again by
+POST /api/runs (422 if no longer approved/active) and bound to the run, so a stale
+dropdown can never run another skill: a selection missing from the refreshed list
+falls back to Auto on the client, and the server still enforces it. The selection is
+part of the idempotency signature. The Run history panel lists the open
+conversation's runs (status, skill, pinned model from the run snapshot, error code)
+and loads steps/usage for one on demand from GET /api/runs/{id}; content comes from
+the server's redacted snapshot. Not built: @resource attachments (no resource
+catalog exists), a model picker (the model is pinned from server configuration per
+run, which the history shows), and server-driven model availability.
+Verified: tsc typecheck, vite build, 9 frontend unit tests (run request body,
+selection fallback, labels) and backend tests for the endpoint. NOT run: eslint (not
+installed in this checkout; CI/check_all run it in Docker) and the Playwright browser
+tests, so the new selector and panel have not been exercised in a browser.
