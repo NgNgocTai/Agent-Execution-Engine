@@ -313,3 +313,33 @@ Verified: tsc typecheck, vite build, 9 frontend unit tests (run request body,
 selection fallback, labels) and backend tests for the endpoint. NOT run: eslint (not
 installed in this checkout; CI/check_all run it in Docker) and the Playwright browser
 tests, so the new selector and panel have not been exercised in a browser.
+
+Intervention lifecycle and execution telemetry (P2-04/P2-05)
+-----------------------------------------------------------
+Migrations 0013 (run_interventions) and 0014 (tool_executions.started_at,
+duration_ms, skill_ref, all nullable) bring the head to 0014; back up, stop writers
+and finish or cancel waiting runs first, as for earlier migrations.
+Interventions: POST /api/runs/{id}/interventions still only accepts an instruction
+at a safe approval checkpoint (it never changes the action being approved) and now
+returns intervention_id. Each one is a row with status pending -> delivered (shown to
+the model after the current tool batch; the worker marks it when it appends the
+intervention_applied event) or undelivered (the run ended, was cancelled, or the
+worker died first). GET /api/runs/{id} lists them with created_at/delivered_at; a
+pending row of a finished run is always reported undelivered, so "accepted" is never
+mistaken for "applied". Not built: injecting while a tool batch is executing, and
+requeueing an undelivered instruction into a new run (deliberately not automatic: a
+stale instruction must not silently steer another task).
+Telemetry: every durable tool execution records started_at, duration_ms and
+skill_ref (pinned package version id, or "builtin"). GET /api/operations/skill-stats
+?days=1..90 (viewer/operator/approver) aggregates per tool and version: executions,
+succeeded, failed, unknown_or_running, avg/max latency, timed_executions, and
+separates kind "read" (load_skill/read_skill_file) from "execute", so reads are never
+mixed into error rates. Unknown or still-running outcomes are never counted as
+success; rows from before 0014 have no timing and are only counted as
+untimed_legacy_rows. Labels are tool name and version only (bounded cardinality).
+Deliberately not done from P2-04: model-specific token estimators (no offline
+tokenizer for every provider; the conservative UTF-8 byte proxy stays, which can only
+over-estimate), LLM summaries of old context (a summarising model call adds cost and
+a path where a summary could drop an approval or entity; the extractive excerpt
+stays), and an external prompt registry (prompts are pinned by hash per run since
+0010 and a remote registry would add a dependency that can block runs).
