@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.event_emitter import EventEmitter
 from core.auth import require
-from core.schemas import AgentEvent, AgentEventType, NormalizedMessage, NormalizedToolCall
+from core.schemas import AgentEvent, NormalizedMessage, NormalizedToolCall
 from services.history import build_messages
 from services.prompts import get_system_prompt
 from services.providers.base import LLMProvider

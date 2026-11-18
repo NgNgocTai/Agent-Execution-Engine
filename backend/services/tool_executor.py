@@ -10,7 +10,7 @@ from services.site_capabilities import SiteError
 from services.evidence import evidence
 from core.config import settings
 
-from services.skills.base import BaseSkill, SkillResult, SkillStatus
+from services.skills.base import SkillResult, SkillStatus
 from services.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)

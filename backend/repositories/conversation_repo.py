@@ -132,7 +132,6 @@ class ConversationRepository:
         return conversations
 
     async def delete(self, conversation_id: str) -> bool:
-        from sqlalchemy import delete
         from repositories.models import PendingApproval
         if await self.get(conversation_id, for_update=True) is None:
             return False

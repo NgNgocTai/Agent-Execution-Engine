@@ -3,7 +3,6 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 

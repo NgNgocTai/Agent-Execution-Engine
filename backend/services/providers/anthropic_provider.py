@@ -2,7 +2,6 @@ import json
 import logging
 from typing import AsyncGenerator
 
-from core.config import settings
 from core.schemas import NormalizedMessage, NormalizedResponse
 from services.providers.base import LLMProvider
 from services.providers.thinking import (

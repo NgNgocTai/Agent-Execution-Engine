@@ -1,14 +1,13 @@
 from core.clock import utcnow
 
 """Database job ownership and fencing. No automatic retry of uncertain work."""
-from datetime import datetime, timedelta
+from datetime import timedelta
 import json
-from uuid import uuid4
 from sqlalchemy import select, update, exists
 
 from repositories.run_models import Run, RunJob, ToolExecution
 from services.run_service import TERMINAL, append_event
-from services.skills.base import SkillResult, SkillStatus
+from services.skills.base import SkillResult
 from core.request_context import step_identifier
 
 LEASE_SECONDS = 45

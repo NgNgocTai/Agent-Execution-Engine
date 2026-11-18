@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import hashlib
 import json
@@ -13,7 +12,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from core.auth import Principal, _principal, authenticate
 from core.config import settings
-from services.connectors import ConnectorUnavailable, ConnectorHub
+from services.connectors import ConnectorHub
 from services.site_capabilities import (
     MAX_DEVICES,
     CapabilityBroker,

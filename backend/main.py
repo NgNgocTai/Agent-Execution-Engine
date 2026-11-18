@@ -9,17 +9,7 @@ from core.config import settings
 from core.redaction import RedactingFilter
 from core.auth import AuthenticationMiddleware
 from core.request_context import RequestContextMiddleware
-from repositories.clickhouse_repo import AlarmRepository
 from repositories.engine import init_db
-from repositories.postgres_repo import DeviceRepository
-from services.agent_service import AgentEngine
-from services.skills.noc_alarm_enrichment import NocAlarmEnrichmentSkill
-from services.skills.node_health_remediate import NodeHealthRemediateSkill
-from services.skills.alarm_statistics import AlarmStatisticsSkill
-from services.skills.device_inventory_lookup import DeviceInventoryLookupSkill
-from services.skills.registry import SkillRegistry
-from services.tool_executor import ToolExecutor
-from tracing.langfuse_tracer import LangfuseTracer
 
 logging.basicConfig(level=logging.INFO)
 for handler in logging.getLogger().handlers:

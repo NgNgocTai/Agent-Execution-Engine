@@ -2,7 +2,6 @@ import asyncio
 import logging
 import json
 from datetime import datetime, timezone
-from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -484,7 +483,7 @@ async def chat(req: ChatRequest):
                     yield event.to_sse()
                     if persist_messages:
                         yield f'data: {{"type":"conversation_id","data":{{"conversation_id":"{conversation_id}"}}}}\n\n'
-        except Exception as exc:
+        except Exception:
             logger.exception("Chat stream failed")
             yield EventEmitter(conversation_id).error(
                 message="Chat stream failed. Please retry or reload the conversation.",

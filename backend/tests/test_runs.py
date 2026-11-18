@@ -17,7 +17,7 @@ from controllers import runs as routes, chat
 from core.config import settings
 from core.schemas import NormalizedResponse, NormalizedToolCall
 from repositories.models import Base, PendingApproval
-from repositories.run_models import Run, RunJob, RunEvent, RunCheckpoint, ToolExecution
+from repositories.run_models import Run, RunJob, RunCheckpoint, ToolExecution
 from services.agent_service import AgentEngine
 from services.job_service import claim, fence, LeaseLost, recover_expired
 from services.run_worker import RunWorker

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator
 
-from core.schemas import NormalizedMessage, NormalizedResponse, NormalizedToolCall
+from core.schemas import NormalizedMessage, NormalizedResponse
 from services.skills.base import ToolSchema
 
 

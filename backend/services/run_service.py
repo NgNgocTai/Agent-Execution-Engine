@@ -1,7 +1,6 @@
 from core.clock import utcnow
 import hashlib
 import json
-from datetime import datetime
 from uuid import uuid4
 
 from fastapi import HTTPException

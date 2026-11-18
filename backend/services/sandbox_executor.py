@@ -13,7 +13,6 @@ import re
 import tarfile
 from uuid import uuid4
 from core.config import settings
-from services.skills.base import SkillResult
 
 
 class SandboxUnavailable(RuntimeError):
@@ -29,7 +28,7 @@ async def bounded_read(stream, maximum=65536):
     return bytes(result), truncated
 
 
-async def docker_command(arguments, payload=None, timeout=5):
+async def docker_command(arguments, payload=None, timeout=5):  # noqa: ASYNC109  (bounds a subprocess, not a task)
     process = await asyncio.create_subprocess_exec(
         "docker",
         *arguments,

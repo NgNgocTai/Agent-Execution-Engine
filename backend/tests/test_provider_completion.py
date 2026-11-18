@@ -93,7 +93,7 @@ class CompletionContractTest(unittest.IsolatedAsyncioTestCase):
             class Provider:
                 calls = 0
 
-                async def chat_completion(self, messages, tools):
+                async def chat_completion(self, messages, tools, reason=reason):
                     self.calls += 1
                     yield NormalizedResponse(
                         text_content="partial",
@@ -142,7 +142,7 @@ class CompletionContractTest(unittest.IsolatedAsyncioTestCase):
             adapter = object.__new__(AnthropicProvider)
             adapter._use_openai_format = False
             adapter.model_name = "fake"
-            adapter.client = NS(messages=NS(stream=lambda **kw: context))
+            adapter.client = NS(messages=NS(stream=lambda context=context, **kw: context))
             output = [
                 r
                 async for r in adapter.chat_completion(

@@ -2,10 +2,9 @@
 
 import json
 import math
-from core.config import settings
 from core.redaction import redact
 from core.schemas import NormalizedMessage
-from services.context_manager import prepare_context, estimate, ContextBudgetExceeded
+from services.context_manager import prepare_context, estimate
 
 
 class BudgetExceeded(ValueError):
