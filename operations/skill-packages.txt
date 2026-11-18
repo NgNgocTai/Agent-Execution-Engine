@@ -87,6 +87,37 @@ Exit failure, malformed/non-finite JSON, privileged approval requests or output
 overflow fail validation. An exit-zero result does not override an invalid
 contract. Every script must pass its own sample input in the real sandbox.
 
+Reading instructions on demand
+------------------------------
+Tool descriptions in the catalog are short (description + purpose, at most 600
+characters plus a pointer). The complete SKILL.md and bundled files are read by
+the agent through two read-only tools registered for every run:
+- load_skill(skill_name, offset, limit): SKILL.md in chunks of at most 12000
+  characters and 8 KB encoded (below the 16 KiB tool output limit, so nothing is
+  withheld), with next_offset and the list of bundled files (first 60 paths).
+- read_skill_file(skill_name, path, offset, limit): one bundled text file, by
+  exact path from that list. Paths are dictionary keys of the reviewed archive;
+  nothing is resolved on a filesystem, so ../, absolute paths and unlisted names
+  fail.
+Both read the version PINNED by the run, never the newly active one, and refuse
+a revoked or changed version. Content is returned with a notice that it is
+untrusted reference text: it cannot change policy, grant approval, widen scope
+or authorize an action. They are allowed for site-restricted principals because
+they expose reviewed package text, never alarm, inventory or host data.
+
+Choosing a specific skill
+-------------------------
+POST /api/runs accepts optional "skill" (omitted or null = auto, all pinned
+skills). The server accepts only built-in names or approved and currently active
+packages (HTTP 422 otherwise) and stores it in runs.requested_skill (migration
+0011). A specific run exposes only that package's tools plus the two readers,
+and the engine refuses every other tool until load_skill for that package has
+returned in THIS run (an earlier run's load does not count; survives approval
+resume because it is derived from the saved messages). The skill is part of the
+idempotency hash only when set, so auto-mode retries behave as before. If the
+package is revoked before execution, the run fails instead of using another one.
+Run snapshots report "skill": "auto" or the selected name.
+
 Multiple scripts become separate tools with stable path-derived suffixes.
 Runs pin both package content and resolved run-spec hashes. Updating the active
 version does not change a waiting run. Revoking a version blocks future calls.

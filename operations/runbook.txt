@@ -194,7 +194,8 @@ Offline pull-request checks do not use this job or need API keys.
 
 Provider contracts and pinned runs (09/11/2026)
 ----------------------------------------------
-Apply migration head 0010 with web/worker writers stopped. Resolve or cancel old
+Apply migration head 0011 (adds nullable runs.requested_skill; 0010 pins run
+configuration) with web/worker writers stopped. Resolve or cancel old
 queued/waiting runs before rollout: existing rows remain unpinned and cannot
 approve/resume with an inferred configuration. See llm-run-contracts.txt for
 protocol compatibility, error codes, snapshot fields and rollout details.

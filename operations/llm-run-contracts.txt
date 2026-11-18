@@ -74,7 +74,7 @@ It can still be rejected/cancelled. Previously completed runs remain readable;
 the public configuration summary indicates requires_new_run for unpinned runs.
 
 Rollout: finish or cancel queued/waiting runs before deploying; back up the control
-DB and stop writers as in runbook.txt; migrate to head (0010), then restart the
+DB and stop writers as in runbook.txt; migrate to head (0011, which also adds runs.requested_skill), then restart the
 web/worker together. Do not backfill old snapshots from current environment.
 A worker with the new model cannot run against the pre-0010 schema. This change
 has not been applied to the user's live control DB by the implementation task.
