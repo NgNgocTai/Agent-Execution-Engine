@@ -1,8 +1,10 @@
 import { apiFetch } from "./api";
 import type { ConversationMessages } from "./api";
+import { runRequestBody, type SkillOption } from "./runOptions";
 
-export interface RunSummary { run_id: string; conversation_id: string; user_message_id?: number; provider: string; status: string; sequence: number; error_code: string | null }
-export interface RunSnapshot extends RunSummary { messages: ConversationMessages["messages"]; pending_approvals: ConversationMessages["pending_approvals"] }
+export interface RunSummary { run_id: string; conversation_id: string; user_message_id?: number; provider: string; skill?: string; configuration?: Record<string, unknown> | null; status: string; sequence: number; error_code: string | null; created_at?: string; updated_at?: string }
+export interface RunStepView { step_id: string; kind: string; status: string; started_at: string; finished_at: string | null; usage: Record<string, unknown> | null }
+export interface RunSnapshot extends RunSummary { messages: ConversationMessages["messages"]; pending_approvals: ConversationMessages["pending_approvals"]; steps?: RunStepView[] }
 
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -11,7 +13,8 @@ async function json<T>(response: Response): Promise<T> {
   }
   return response.json();
 }
-export const startRun = async (message: string, provider: string, conversationId: string | null, key: string, signal?: AbortSignal) => json<RunSummary>(await apiFetch("/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, provider, conversation_id: conversationId, idempotency_key: key }), signal }));
+export const startRun = async (message: string, provider: string, conversationId: string | null, key: string, skill = "auto", signal?: AbortSignal) => json<RunSummary>(await apiFetch("/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(runRequestBody(message, provider, conversationId, key, skill)), signal }));
+export const getRunOptions = async (signal?: AbortSignal) => json<{ skills: SkillOption[] }>(await apiFetch("/runs/options", { signal }));
 export const getRun = async (id: string, signal?: AbortSignal) => json<RunSnapshot>(await apiFetch(`/runs/${encodeURIComponent(id)}`, { signal }));
 export const getRuns = async (id: string, signal?: AbortSignal) => json<{ runs: RunSummary[] }>(await apiFetch(`/conversations/${encodeURIComponent(id)}/runs`, { signal }));
 export const cancelRun = async (id: string) => json<RunSummary>(await apiFetch(`/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }));

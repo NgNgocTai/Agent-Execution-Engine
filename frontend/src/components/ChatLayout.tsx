@@ -4,6 +4,7 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import ReasoningTrace from "./ReasoningTrace";
 import ChatInput from "./ChatInput";
+import RunHistory from "./RunHistory";
 import RunStatus from "./RunStatus";
 import { useChat } from "../hooks/useChat";
 import {
@@ -42,7 +43,7 @@ export default function ChatLayout() {
   const {
     messages, conversationId, isStreaming, currentProvider,
     send, newChat, switchProvider, toggleTab, loadConversation, approveDecision,
-    stop, runStatus, connection, timeline, error, notice, intervene, reconcile,
+    stop, runStatus, connection, timeline, error, notice, intervene, reconcile, skills, selectedSkill, setSelectedSkill, activeRun,
   } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -216,7 +217,11 @@ export default function ChatLayout() {
         </main>
 
         <RunStatus status={runStatus} connection={connection} error={error} timeline={timeline} onStop={stop} notice={notice} isAdmin={isAdmin} onIntervene={intervene} onReconcile={reconcile} />
+        <RunHistory conversationId={conversationId} refreshKey={`${activeRun?.run_id ?? ""}:${runStatus ?? ""}`} />
         <ChatInput
+          skills={skills}
+          selectedSkill={selectedSkill}
+          onSelectSkill={setSelectedSkill}
           onSend={send}
           isStreaming={isStreaming}
           currentProvider={currentProvider}

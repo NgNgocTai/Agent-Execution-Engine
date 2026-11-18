@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, ChevronDown } from "lucide-react";
 import type { ProviderOption } from "../types";
+import { AUTO_SKILL, skillLabel, type SkillOption } from "../lib/runOptions";
 
 interface Props {
   onSend: (message: string) => void;
@@ -8,6 +9,9 @@ interface Props {
   currentProvider: string;
   onSwitchProvider: (provider: string) => void;
   providers: ProviderOption[];
+  skills?: SkillOption[];
+  selectedSkill?: string;
+  onSelectSkill?: (skill: string) => void;
 }
 
 const FALLBACK_PROVIDER: ProviderOption = {
@@ -16,7 +20,7 @@ const FALLBACK_PROVIDER: ProviderOption = {
   color: "#0050cb",
 };
 
-export default function ChatInput({ onSend, isStreaming, currentProvider, onSwitchProvider, providers }: Props) {
+export default function ChatInput({ onSend, isStreaming, currentProvider, onSwitchProvider, providers, skills = [], selectedSkill = AUTO_SKILL, onSelectSkill }: Props) {
   const [message, setMessage] = useState("");
   const [showProviders, setShowProviders] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -58,6 +62,22 @@ export default function ChatInput({ onSend, isStreaming, currentProvider, onSwit
           disabled={isStreaming}
         />
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+          {skills.length > 1 && onSelectSkill && (
+            <select
+              aria-label="Skill"
+              title={skills.find((s) => s.name === selectedSkill)?.description}
+              value={selectedSkill}
+              disabled={isStreaming}
+              onChange={(e) => onSelectSkill(e.target.value)}
+              className="max-w-[150px] truncate px-3 py-1.5 bg-[#f3f3f4] rounded-full text-[11px] font-bold text-[#424656] border border-[#e2e2e2] hover:bg-[#e8effd] cursor-pointer"
+            >
+              {skills.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.kind === "auto" ? "Skill: Auto" : skillLabel(s.name)}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="relative">
             <button
               onClick={() => setShowProviders(!showProviders)}

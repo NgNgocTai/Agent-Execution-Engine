@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../types";
 import { approveAction, getConversationMessages } from "../lib/api";
-import { cancelRun, decideRun, getRuns, startRun, interveneRun, reconcileRun, type RunSummary } from "../lib/runs";
+import { cancelRun, decideRun, getRunOptions, getRuns, startRun, interveneRun, reconcileRun, type RunSummary } from "../lib/runs";
+import { AUTO_SKILL, resolveSkill, type SkillOption } from "../lib/runOptions";
 import { activeStatus, emptyRun } from "../lib/runReducer";
 import { chatHistory, chatMessage } from "../lib/chatHistory";
 import { readSSE } from "../lib/sse";
@@ -12,6 +13,8 @@ export function useChat() {
   const [conversationId, setConversationId] = useState<string | null>(() => sessionStorage.getItem("noc-selected-conversation"));
   const [currentProvider, setCurrentProvider] = useState("openai");
   const [run, setRun] = useState<RunSummary | null>(null);
+  const [skills, setSkills] = useState<SkillOption[]>([]);
+  const [selectedSkill, setSelectedSkill] = useState<string>(AUTO_SKILL);
   const [epoch, setEpoch] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -44,6 +47,11 @@ export function useChat() {
   }, [setState]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    getRunOptions(controller.signal).then(result => { setSkills(result.skills); setSelectedSkill(current => resolveSkill(current, result.skills)); }).catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+  useEffect(() => {
     const selected = sessionStorage.getItem("noc-selected-conversation");
     if (selected) void loadConversation(selected);
   }, [loadConversation]);
@@ -56,17 +64,17 @@ export function useChat() {
     if (busyRef.current || isStreaming || state?.status === "waiting_approval" || !text.trim()) return;
     const view = generation.current;
     busyRef.current = true; setBusy(true); setError(null); setNotice("");
-    const signature = JSON.stringify([text, currentProvider, conversationId]);
+    const signature = JSON.stringify([text, currentProvider, conversationId, selectedSkill]);
     if (retryKey.current?.signature !== signature) retryKey.current = { signature, key: crypto.randomUUID() };
     try {
-      const accepted = await startRun(text, currentProvider, conversationId, retryKey.current.key);
+      const accepted = await startRun(text, currentProvider, conversationId, retryKey.current.key, selectedSkill);
       if (view !== generation.current) return;
       setHistory(previous => [...previous, ...(state ? [{ ...chatMessage("assistant", state.text), toolCallCards: state.cards }] : []), chatMessage("user", text)]);
       setState(emptyRun(accepted.run_id)); setRun(accepted); setConversationId(accepted.conversation_id);
       setEpoch(value => value + 1); retryKey.current = null;
     } catch (failure) { if (view === generation.current) setError((failure as Error).message); }
     finally { busyRef.current = false; if (view === generation.current) setBusy(false); }
-  }, [state, currentProvider, conversationId, isStreaming, setState]);
+  }, [state, currentProvider, conversationId, selectedSkill, isStreaming, setState]);
 
   const approveDecision = useCallback(async (callId: string, approved: boolean) => {
     if (!conversationId || busyRef.current) return;
@@ -114,6 +122,6 @@ export function useChat() {
     setHistory(previous => previous.map(item => ({ ...item, toolCallCards: item.toolCallCards.map(card => card.callId === callId ? { ...card, showInput } : card) })));
   }, [setState]);
   const live: ChatMessage[] = state ? [{ ...chatMessage("assistant", state.text), toolCallCards: state.cards, isStreaming: activeStatus(state.status) }] : [];
-  return { messages: [...history, ...live], conversationId, currentProvider, isStreaming, send, newChat, switchProvider, toggleTab, loadConversation, approveDecision, stop,
+  return { messages: [...history, ...live], conversationId, currentProvider, skills, selectedSkill, setSelectedSkill, activeRun: run, isStreaming, send, newChat, switchProvider, toggleTab, loadConversation, approveDecision, stop,
     runStatus: state?.status || null, connection, timeline: state?.timeline || [], error: error || state?.error || null, notice, intervene, reconcile };
 }
