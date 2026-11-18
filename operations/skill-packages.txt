@@ -253,11 +253,29 @@ error-code spread, explainable drivers, top error codes, newest/oldest alarm tim
 calibration "uncalibrated-v0", output validated by a reviewed output_schema.
 It was written for the data this system really has. The reference project's
 ran-kpi-anomaly-triage and core-link-impact-summary rank KPI and link records
-(latency, packet loss, throughput, link_id) and fall back to built-in SAMPLE
-records when none are given. Neither the alarm table nor the inventory here has
-KPI or link fields, so those algorithms were NOT ported; porting them without
-data would mean inventing it. This package never falls back to samples: missing
-records fail the call, and "no alarms" is reported as none_observed, not healthy.
+(latency, packet loss, throughput, link_id) and fall back to built-in SAMPLE records
+when none are given. Neither the alarm table nor the inventory here has KPI or link
+fields, so there is no backend capability for them.
+
+Operator-supplied KPI and link packages (P2-01, second step)
+-------------------------------------------------------------
+skill_examples/ran-kpi-triage and skill_examples/core-link-impact port the two
+algorithms for records the OPERATOR gives the model (an export or pasted table). They
+declare no broker capability and no connector: the model passes the operator's records
+as the `records` input, and SKILL.md forbids inventing, estimating or completing any
+value. Output always says input_source "operator_supplied", calibration
+"uncalibrated-v0" and no root cause. Differences from the reference scripts, each
+covered by tests in backend/tests/test_kpi_link_examples.py:
+ - no sample fallback: missing records fail the call;
+ - a KPI that is not reported is not scored and not assumed healthy (the reference
+   defaults availability to 100); a cell with no KPI is "insufficient_data";
+ - a reported 0 Mbps is scored (the reference skips falsy throughput);
+ - an unrecognised link severity is "unknown" and flagged, not silently "normal", and
+   missing site/service names are not counted as an "unknown" site or service;
+ - input and output schemas are bounded (200 records in, 50 rows out, truncation warned).
+This is still not live monitoring: nothing here reads a KPI or link source, so "no
+breach" means "no breach in what was supplied". A live version needs the data below.
+
 Still needed for the full P2-01 (cannot be done from code alone):
  - a KPI source (cell/site KPI series with unit and observed time) and a link or
    topology table (link_id, endpoints), exposed as new backend capabilities;
