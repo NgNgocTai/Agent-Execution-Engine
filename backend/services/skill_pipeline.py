@@ -52,16 +52,19 @@ def _unused_extensions(manifest):
             if field.shape is None
         }
 
-    exclude = {}
-    if manifest.output_schema is None:
-        exclude["output_schema"] = True
+    def unset(spec):
+        return {
+            name: True
+            for name in ("output_schema", "capability", "capability_field")
+            if getattr(spec, name) is None
+        }
+
+    exclude = unset(manifest)
     if top := inputs(manifest.input_fields):
         exclude["input_fields"] = top
     scripts = {}
     for index, spec in enumerate(manifest.scripts):
-        entry = {}
-        if spec.output_schema is None:
-            entry["output_schema"] = True
+        entry = unset(spec)
         if nested := inputs(spec.input_fields):
             entry["input_fields"] = nested
         if entry:
@@ -161,6 +164,14 @@ def initial_report(manifest, files, digest):
                     if spec.output_schema is not None
                     else {}
                 ),
+                **(
+                    {
+                        "capability": spec.capability,
+                        "capability_field": spec.capability_field,
+                    }
+                    if spec.capability
+                    else {}
+                ),
                 "timeout_seconds": spec.timeout_seconds,
             }
             for spec in manifest.run_specs()
@@ -226,6 +237,9 @@ async def llm_proposal(manifest, files, provider):
     declared = {spec.entrypoint for spec in manifest.run_specs()}
     if len(paths) != len(set(paths)) or any(path not in declared for path in paths):
         raise ValueError("LLM proposed an undeclared script")
+    if any(spec.capability for spec in result.scripts):
+        # Data access is granted only by the author's reviewed run-spec.
+        raise ValueError("LLM cannot grant data capabilities")
     for spec in result.scripts:
         spec.input_model().model_validate(spec.sample_input)
     return result, budget.snapshot()

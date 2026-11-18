@@ -19,6 +19,8 @@ BUILTIN_SKILL_NAMES = (
     "device_inventory_lookup",
     "alarm_statistics",
     "node_health_remediate",
+    "site_inventory",
+    "site_alarm_overview",
 )
 SHORT_DESCRIPTION = 600
 
@@ -66,6 +68,8 @@ def builtin_manifest(skill):
             "alarm_statistics": ["alarms", "inventory"],
             "device_inventory_lookup": ["inventory", "alarms"],
             "noc_alarm_enrichment": ["alarms", "inventory"],
+            "site_inventory": ["inventory"],
+            "site_alarm_overview": ["alarms", "inventory"],
         }.get(skill.name, []),
         "evidence_contract": "source, retrieved_at, observed_at, entity, time_window_minutes, warnings",
     }
@@ -119,7 +123,8 @@ def resolved_manifest(record):
 
 
 class ScriptSkill(BaseSkill):
-    def __init__(self, record, sessions, script_path=None, naming_version=2):
+    def __init__(self, record, sessions, script_path=None, naming_version=2, broker=None):
+        self.broker = broker
         self.version_id, self.digest, self.sessions = (
             record.id,
             record.content_hash,
@@ -152,7 +157,8 @@ class ScriptSkill(BaseSkill):
             self.manifest = Manifest.model_validate(
                 {**self.manifest.model_dump(), **spec.model_dump(), "scripts": []}
             )
-        self.input_model = self.manifest.input_model()
+        self.input_model = self.manifest.tool_input_model()
+        self.capability = self.manifest.capability
 
     @property
     def name(self):
@@ -193,7 +199,25 @@ class ScriptSkill(BaseSkill):
             return SkillResult(
                 status=SkillStatus.SUCCESS, data={"instructions": manifest.instructions}
             )
+        if self.capability:
+            arguments = await self._brokered(arguments)
         return await execute_sandbox(self.manifest, files, arguments)
+
+    async def _brokered(self, arguments):
+        """Add backend-fetched, site-authorized records, then re-validate all."""
+        from services.connectors import ConnectorUnavailable
+
+        if self.broker is None:
+            raise ConnectorUnavailable(self.capability, "capability broker unavailable")
+        field = next(
+            f for f in self.manifest.input_fields if f.name == self.manifest.capability_field
+        )
+        rows, _ = await self.broker.fetch(
+            self.capability, arguments, field.shape.get("maxItems", 1000)
+        )
+        full = {**arguments, field.name: rows}
+        # Same validator as the reviewed run-spec; oversize data fails closed.
+        return self.manifest.input_model().model_validate(full).model_dump()
 
 
 async def requestable_skill(session, name):
@@ -247,6 +271,12 @@ def _custom_loader(sessions, pin):
 
 async def registry_for_run(base, session, sessions, run):
     registry = SkillRegistry()
+    hub = getattr(base, "connector_hub", None)
+    broker = None
+    if hub is not None:
+        from services.site_capabilities import CapabilityBroker
+
+        broker = CapabilityBroker(hub)
     for name in base.list_names():
         registry.register(base.get(name))
     pins = json.loads(run.selected_skill_versions)
@@ -304,7 +334,9 @@ async def registry_for_run(base, session, sessions, run):
                 raise ValueError("Pinned skill run-spec changed")
             specs = manifest.run_specs()
             for path in [spec.entrypoint for spec in specs] or [None]:
-                skill = ScriptSkill(record, sessions, path, pin.get("naming_version", 1))
+                skill = ScriptSkill(
+                    record, sessions, path, pin.get("naming_version", 1), broker
+                )
                 if len(skill.name) > 64:
                     from services.workflow.state import CheckpointIncompatible
                     raise CheckpointIncompatible("Legacy tool names exceed the provider limit; start a new run")

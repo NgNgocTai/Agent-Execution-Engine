@@ -88,6 +88,25 @@ class ScriptSpec(BaseModel):
     timeout_seconds: int = Field(default=10, ge=1, le=30)
     output_contract: Literal["skill_result", "json", "text"] = "skill_result"
     output_schema: dict | None = None
+    # Backend-brokered data: the broker fills capability_field (an array input)
+    # with bounded records for the caller's authorized site. The script gets
+    # JSON only: no DSN, SQL, SSH or network.
+    capability: Literal["site_inventory", "site_alarms"] | None = None
+    capability_field: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,63}$")
+
+    @model_validator(mode="after")
+    def check_capability(self):
+        if (self.capability is None) != (self.capability_field is None):
+            raise ValueError("capability and capability_field must be set together")
+        if self.capability is None:
+            return self
+        fields = {field.name: field for field in self.input_fields}
+        target, site = fields.get(self.capability_field), fields.get("site")
+        if target is None or target.kind != "array" or not target.required:
+            raise ValueError("capability_field must be a required array input")
+        if site is None or site.kind != "string" or not site.required:
+            raise ValueError("A brokered script needs a required string input named site")
+        return self
 
     @model_validator(mode="after")
     def check_output_schema(self):
@@ -101,11 +120,17 @@ class ScriptSpec(BaseModel):
             raise ValueError("A text output can only declare a string schema")
         return self
 
-    def input_model(self):
+    def tool_input_model(self):
+        """What the agent supplies: everything except broker-filled records."""
+        return self.input_model(brokered=False)
+
+    def input_model(self, brokered=True):
         fields = {}
         for field in self.input_fields:
             if field.name in fields:
                 raise ValueError("Duplicate input field")
+            if not brokered and field.name == self.capability_field:
+                continue
             if field.kind in {"object", "array"}:
                 fields[field.name] = (
                     _structured(field),
