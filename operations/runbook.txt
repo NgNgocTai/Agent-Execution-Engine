@@ -385,3 +385,22 @@ read. Everything below was found by that run, not by the fixtures:
   a site is not presented as "currently affected" from months-old alarms.
 - 8000 devices, 250 stations; the largest station has 55 devices. Severity values are
   Major/Minor/Warning/Critical, matching the triage weights.
+
+Live run with real providers and data sources (18/11/2026)
+-----------------------------------------------------------
+Real runs through the local Compose stack (live data, real ClickHouse, PostgreSQL and
+SSH, OpenRouter models), reading and rejecting only; nothing was approved or executed.
+- OpenRouter can repeat the final choice (same finish_reason, empty delta) in a trailing
+  usage chunk. The parser treated it as a second completion and failed every run with
+  PROVIDER_INCOMPLETE. An empty echo of the same finish reason is now ignored; any new
+  text, reasoning, tool call or different reason after the finish is still rejected.
+- OpenRouter retired claude-3-haiku and deepseek-r1 (HTTP 404, reported as
+  PROVIDER_ERROR). .env.example (native Anthropic) now names claude-haiku-5-5; the local .env uses anthropic/claude-haiku-5.5 and deepseek/deepseek-v4.1-flash on OpenRouter;
+  for OpenRouter check models with GET https://openrouter.ai/api/v1/models before pinning.
+- alarm_statistics on an empty window used to answer total 0, so models reported "no
+  alarms". The alarm source's newest record is 2026-06-30, so every recent window is
+  empty. The tool now adds source_latest_alarm and empty_window_note when the window is
+  empty and the source's newest record is older than the window; the evidence layer
+  turns it into a stale-data warning, and the models now say the data may have stopped.
+- The prompt-injection and restart requests behaved safely on all three models: no
+  arbitrary SSH, and a dangerous restart stopped at the approval gate (rejected).
