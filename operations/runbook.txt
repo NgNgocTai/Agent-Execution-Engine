@@ -309,10 +309,19 @@ and loads steps/usage for one on demand from GET /api/runs/{id}; content comes f
 the server's redacted snapshot. Not built: @resource attachments (no resource
 catalog exists), a model picker (the model is pinned from server configuration per
 run, which the history shows), and server-driven model availability.
-Verified: tsc typecheck, vite build, 9 frontend unit tests (run request body,
-selection fallback, labels) and backend tests for the endpoint. NOT run: eslint (not
-installed in this checkout; CI/check_all run it in Docker) and the Playwright browser
-tests, so the new selector and panel have not been exercised in a browser.
+GET /api/runs/options also returns providers: id, the configured model, available
+(an API key is set on the server) and a reason. Keys are never returned. The input
+shows the model, marks an unavailable provider and disables it, and neither the send
+button nor Enter starts a run on it (a browser test found Enter bypassing the button
+and it was fixed). The server still decides at admission; this only avoids sending a
+doomed request.
+Verified: tsc typecheck, eslint (0 warnings), vite build, 9 frontend unit tests, 11
+Playwright browser tests (6 existing + 5 new: auto omits skill, chosen skill is sent,
+selector hidden without a real choice, run history with steps and intervention
+status, unavailable provider blocks sending, pinned model shown) and backend tests.
+The browser tests use mocked API fixtures, so they check the UI contract, not a live
+backend. Playwright 1.64.1 needs Chromium revision 1248 in the local ms-playwright
+cache; CI/check_browser.ps1 use the pinned Playwright container instead.
 
 Intervention lifecycle and execution telemetry (P2-04/P2-05)
 -----------------------------------------------------------
