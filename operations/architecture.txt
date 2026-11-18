@@ -1,0 +1,120 @@
+# Kiến trúc NOC Agent (trạng thái hiện tại)
+
+Tài liệu này mô tả code đang chạy trên nhánh hiện tại. docs/technical_design.md (bản local, không theo dõi bằng git)
+là thiết kế ban đầu và còn mô tả luồng chat/SSE cũ; khi hai tài liệu khác nhau, tài liệu này
+(và code) là chuẩn. Hướng dẫn vận hành nằm trong operations/runbook.txt.
+
+## 1. Tổng quan
+
+```text
+Trình duyệt (React/Vite, nginx)
+        │  HTTPS, Bearer token
+        ▼
+FastAPI "web"  ──────────────►  PostgreSQL (control database)
+ - xác thực, phân quyền            runs, run_events, jobs, tool_executions,
+ - tạo run, SSE replay             checkpoints, approvals, skills, audit
+ - quản trị skill                         ▲
+        │ tạo run + job                   │ claim / lease / fence
+        ▼                                 │
+Worker ngoài (python -m worker) ──────────┘
+ - AgentEngine (vòng lặp ReAct)
+ - gọi LLM qua provider gateway
+ - chạy tool: built-in, SSH, skill sandbox
+        │
+        ├── ClickHouse  (alarm)         ┐ connector lười, độc lập,
+        ├── PostgreSQL  (inventory)     │ có backoff; /ready báo "degraded"
+        ├── SSH node                    ┘
+        └── Docker sandbox (skill script do người dùng tải lên)
+```
+
+Web và worker là hai tiến trình riêng, dùng chung một control database. Web không chạy agent:
+nó ghi run và job, worker nhận job và ghi sự kiện, client đọc sự kiện qua SSE. Nhờ vậy việc
+ngắt kết nối trình duyệt, restart web hoặc reload trang không làm mất run.
+
+## 2. Vòng đời một run
+
+1. `POST /api/runs` kiểm tra quyền, hạn mức theo actor, run đang hoạt động, idempotency key,
+   rồi lưu **snapshot cấu hình** của run (model, fallback, protocol, prompt và hash, budget,
+   pricing; không lưu API key). Trả `202`.
+2. Worker `claim` job với lease. Mọi lần ghi sau đó đều qua `fence` token; worker mất lease
+   không ghi được nữa (`LeaseLost`).
+3. `AgentEngine` lặp: dựng context (nén có giữ cặp tool call/result và entity) → gọi provider
+   → nhận text, thinking hoặc batch tool call → thực thi → ghi `run_events` và checkpoint JSON
+   có phiên bản. Giới hạn số vòng, token và chi phí theo `RunBudget`.
+4. Tool có tác động (ví dụ `restart_service`) dừng run ở trạng thái `waiting_approval`, giữ
+   nguyên cả batch đang chờ. Sau approve/reject/hết hạn, `approval_resume` đưa run về hàng đợi
+   và worker tiếp tục từ checkpoint.
+5. Client đọc `GET /api/runs/{id}/events` (SSE: snapshot + replay + heartbeat). Reducer phía
+   client idempotent nên reconnect không nhân đôi text. Nếu sự kiện đã hết hạn lưu giữ, client
+   nhận snapshot chuẩn.
+6. `POST /api/runs/{id}/interventions` ghi chỉ dẫn bổ sung với trạng thái
+   pending/delivered/undelivered; chỉ được chèn tại checkpoint, không tự chạy lại sang task mới.
+
+Worker chết giữa chừng: `recover_expired` đánh dấu run/tool là `unknown` thay vì tự chạy lại.
+Admin xác minh trạng thái thật trên node rồi mới đối soát (`/reconcile`).
+
+## 3. Công cụ và skill
+
+| Nhóm | Ví dụ | Ghi chú |
+| --- | --- | --- |
+| Built-in NOC | `noc_alarm_enrichment`, `alarm_statistics`, `device_inventory_lookup`, `node_health_remediate`, `site_capabilities`, `schema_catalog` | Schema tham số chặt; `schema_catalog` chỉ liệt kê bảng/cột trong allowlist, không đọc dòng dữ liệu |
+| Skill do người dùng | gói `SKILL.md` + `scripts/` + `runtime.json` (hoặc `manifest.json` cũ) | Chạy trong Docker sandbox: không mạng, read-only, non-root, nhận JSON qua stdin |
+| Hướng dẫn skill | `load_skill`, `read_skill_file` | Nạp theo nhu cầu, theo đúng version đã ghim cho run |
+
+Pipeline duyệt skill (`skill_pipeline.py`): kiểm tra gói → AST và secret → phân loại →
+(tùy chọn) đề xuất của LLM → run-spec → smoke từng script → reviewer **khác** người tải lên.
+Báo cáo lưu theo policy version, content hash và resolved-manifest hash; review gửi
+`report_hash` để chặn báo cáo cũ. Run ghim cả artifact lẫn run-spec, nên revoke hoặc đổi
+version khi đang chạy sẽ báo lỗi thay vì âm thầm đổi hành vi. Custom script không được xin
+quyền privileged và không nhận credential hay kết nối hạ tầng; dữ liệu đi qua broker theo site.
+
+## 4. An toàn và phân quyền
+
+- **Xác thực**: Bearer token; cấu hình chỉ chứa digest SHA-256, danh tính/role/scope lấy từ
+  phía server (`core/auth.py`). Header do client gửi không bao giờ là nguồn phân quyền.
+  `AUTH_MODE=local` chỉ để phát triển. Chưa có SSO/JWKS.
+- **Role**: `viewer`, `operator`, `approver`, `skill_reviewer`, `admin`. Subject sở hữu
+  conversation của mình; admin xem được tất cả.
+- **Scope**: host, service và site theo principal (`core/policy.py`). Tool tổng hợp
+  alarm/inventory bị chặn với principal bị giới hạn host trừ khi có adapter lọc theo site.
+- **Remediation**: không có allowlist thì không có remediation; guard theo host có cooldown;
+  approve chỉ chạy đúng lệnh đã lưu, không đo lại hay đổi lệnh.
+- **Bằng chứng**: mỗi kết quả tool kèm `observed_at`, `observed_age_seconds`, `freshness`,
+  `warnings`; câu trả lời cuối được kiểm tra theo `EVIDENCE_ENFORCEMENT=off|warn|strict`.
+  Dữ liệu cũ hơn 24 giờ được cảnh báo thay vì trình bày như đang xảy ra.
+- **Redaction** áp dụng cho log, event và input/output hiển thị.
+
+## 5. Dữ liệu và cấu hình
+
+- Control database: PostgreSQL (SQLite chỉ cho test/dev). Migration Alembic 0001–0014,
+  production chạy một lần ở service `migrate`; có công cụ backup/adopt/cutover SQLite cũ
+  (`backend/scripts/control_database.py`) và retention (`retention.py`).
+- `DATA_MODE=fixture` dùng dữ liệu mẫu cho dev/CI; `live` đọc ClickHouse/PostgreSQL thật. Không
+  có dữ liệu thay thế âm thầm: connector lỗi thì capability đó báo lỗi, các capability độc lập
+  vẫn chạy.
+- `DEPLOYMENT_MODE=production` yêu cầu `WORKER_MODE=external`, `AUTH_MODE=bearer`, CORS rõ ràng
+  và DSN PostgreSQL+asyncpg.
+
+## 6. Kiểm chứng
+
+| Lớp | Lệnh | Ghi chú |
+| --- | --- | --- |
+| Lint backend | `make lint` | Ruff: lỗi đúng/sai, import thừa, hazard async |
+| Test backend | `make test` | Test cần PostgreSQL/Docker/SSH thật bị skip nếu thiếu biến môi trường |
+| Eval offline | `make eval` | 12 contract, workflow benchmark, 16 tấn công đối kháng (chấm theo side effect) |
+| Frontend | `make test-frontend` | eslint, typecheck, unit test |
+| Browser E2E | `make e2e` | Playwright với fixture, không cần backend thật |
+| Eval trả phí | workflow `eval-online.yml` | Chạy tay, cần xác nhận rõ |
+
+Eval đối kháng (`backend/evals/adversarial.py`) kiểm tra prompt injection, vượt site, vượt
+schema, lộ secret, cắt kết quả, bỏ qua cổng approval và bịa kết quả; kết luận dựa trên side
+effect thực tế chứ không chỉ trên câu trả lời của model.
+
+## 7. Giới hạn đã biết
+
+- Engine và checkpoint do project tự quản lý, chưa dùng LangGraph.
+- Recovery khi hết lease không tự đưa job read-only về hàng đợi.
+- Chưa có SSO; chưa có lọc dòng theo site cho alarm/inventory tổng hợp.
+- Chưa có workflow KPI/link/topology: chưa có nguồn dữ liệu (xem `upgrade.md`, P2-01).
+- Chưa chèn intervention giữa lúc một batch tool đang chạy; chưa có `@resource` trên UI.
+- Số liệu thực tế (số test, kết quả eval) nằm trong `upgrade.md`, không lặp lại ở đây để khỏi lỗi thời.

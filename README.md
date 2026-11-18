@@ -184,6 +184,18 @@ Không commit secret thật vào repository.
 
 ## Chạy local
 
+Cách nhanh nhất là dùng `make` (xem `make help`):
+
+```bash
+make up            # Compose: PostgreSQL + migrate + backend + worker ngoài + frontend, http://localhost:8080
+make check         # ruff + unit test + eval offline, giống job backend của CI
+make check-frontend
+```
+
+Stack này dùng dữ liệu mẫu (`DATA_MODE=fixture`), không cần API key. Kiến trúc hiện tại:
+[operations/architecture.txt](operations/architecture.txt); vận hành: [operations/runbook.txt](operations/runbook.txt).
+Các mục bên dưới là cách chạy thủ công cũ và có thể lỗi thời.
+
 ### 1. Chạy backend
 
 ```bash
