@@ -47,8 +47,34 @@ Explicit runtime.json example:
 }
 
 The scripts array must cover every .py file under scripts/ exactly once.
-Supported input kinds: string, integer, number and boolean, with no extra fields.
-This is deliberately a bounded schema subset, not unrestricted JSON Schema.
+Supported input kinds: string, integer, number, boolean, object and array, with
+no extra fields. object/array inputs (for example a list of KPI records) declare
+a "shape" and may be optional; an omitted optional array becomes [].
+Example:
+  {"name":"records","kind":"array","shape":{"type":"array","maxItems":500,
+   "items":{"type":"object","required":["cell","drop_rate"],"properties":{
+     "cell":{"type":"string","maxLength":20},
+     "drop_rate":{"type":"number","minimum":0,"maximum":100}}}}}
+
+Schema subset (services/skill_schema.py), shared by API arguments, review smoke
+tests and runtime. Types: string (minLength/maxLength/enum), integer and number
+(minimum/maximum/enum), boolean, array (items/minItems/maxItems) and object
+(properties/required). Objects are always closed; additionalProperties may only
+be false. Unknown keywords ($ref, oneOf, pattern ...) are rejected, not ignored.
+Limits: depth 5, 200 schema nodes, 50 properties per object, 1000 items,
+10000 characters per string, 50 enum values, 20000 value nodes, 256 KiB of
+input JSON. NaN, Infinity and booleans used as numbers are rejected. Validation
+errors name the field path and never echo submitted values.
+
+Optional output_schema uses the same subset and validates the script's data:
+"json" validates the whole JSON value, "skill_result" validates its data member
+and "text" accepts only a string schema. Output that is valid JSON with the
+wrong shape fails the smoke test and runtime call. The schema is part of the
+reviewed run-spec hash, so changing it requires a new analysis and review;
+reports for the old run-spec cannot approve it. Manifests without these fields
+keep their previous hash, so existing approved versions and pending runs keep
+working. Rollout needs no migration, but web and worker must run this version
+before approving a package that uses object/array inputs or output_schema.
 Each script receives its JSON arguments on stdin and as read-only /skill/args.json.
 That filename is reserved and cannot be included in the uploaded package.
 open('args.json') and literal read-only paths to bundled data are supported.
