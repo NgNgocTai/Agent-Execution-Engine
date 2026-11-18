@@ -56,11 +56,26 @@ def strict_arguments(raw):
     return value
 
 
+def _empty_echo(choices, finished_reason):
+    """True when every choice in a post-finish chunk repeats the end and adds nothing."""
+    for choice in choices:
+        if choice.finish_reason not in (None, finished_reason):
+            return False
+        delta = choice.delta
+        if delta is None:
+            continue
+        if getattr(delta, "content", None) or getattr(delta, "tool_calls", None):
+            return False
+        if get_reasoning_delta(delta):
+            return False
+    return True
+
+
 async def openai_chunks(stream):
     from services.run_configuration import execution_settings
 
     config = execution_settings()
-    buffers, parser, finished = {}, ThinkTagParser(), False
+    buffers, parser, finished, finished_reason = {}, ThinkTagParser(), False, None
     async for chunk in stream:
         if getattr(chunk, "usage", None):
             yield NormalizedResponse(
@@ -72,6 +87,11 @@ async def openai_chunks(stream):
         if not chunk.choices:
             continue
         if finished:
+            # Some OpenAI-compatible routers (seen on OpenRouter) repeat the final choice in a
+            # trailing usage chunk. That echo carries nothing new and is ignored; anything
+            # that adds text, reasoning, tool calls or a different finish reason is not.
+            if _empty_echo(chunk.choices, finished_reason):
+                continue
             yield NormalizedResponse(provider_error={"code": "PROVIDER_INCOMPLETE"})
             return
         choice = chunk.choices[0]
@@ -113,7 +133,7 @@ async def openai_chunks(stream):
                 )
         if choice.finish_reason is None:
             continue
-        finished = True
+        finished, finished_reason = True, choice.finish_reason
         reason = normalize_stop(choice.finish_reason)
         for kind, text in parser.flush():
             yield NormalizedResponse(

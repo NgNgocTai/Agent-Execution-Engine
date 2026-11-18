@@ -85,6 +85,34 @@ class CompletionContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r.stop_reason for r in output if r.stop_reason], ["end_turn"])
         self.assertEqual(output[-1].token_usage, {"input": 2, "output": 3})
 
+    async def test_router_echo_of_the_final_choice_is_ignored(self):
+        # Seen live on OpenRouter: the usage chunk repeats finish_reason with an empty delta.
+        def echo(reason, content=""):
+            return NS(usage=NS(prompt_tokens=5, completion_tokens=7),
+                      choices=[NS(delta=NS(content=content, tool_calls=None), finish_reason=reason)])
+
+        call = chunk(arguments='{"group_by":"severity"}')
+        for tail in (echo("tool_calls"), echo(None), echo("tool_calls", None)):
+            with self.subTest(tail=tail.choices[0].finish_reason):
+                output = [r async for r in openai_chunks(items([call, chunk("tool_calls"), tail]))]
+                self.assertFalse(any(r.provider_error for r in output))
+                calls = [c for r in output for c in (r.tool_calls or [])]
+                self.assertEqual([(c.tool_name, c.arguments) for c in calls], [("write", {"group_by": "severity"})])
+                self.assertEqual(output[-1].token_usage, {"input": 5, "output": 7})
+
+    async def test_content_or_a_new_reason_after_the_finish_is_still_rejected(self):
+        cases = {
+            "text": NS(usage=None, choices=[NS(delta=NS(content="more", tool_calls=None), finish_reason=None)]),
+            "reason": NS(usage=None, choices=[NS(delta=NS(content="", tool_calls=None), finish_reason="length")]),
+            "tool": chunk(arguments="{}"),
+        }
+        reasoning = NS(usage=None, choices=[NS(delta=NS(content=None, tool_calls=None, reasoning="x"), finish_reason=None)])
+        cases["reasoning"] = reasoning
+        for name, tail in cases.items():
+            with self.subTest(tail=name):
+                output = [r async for r in openai_chunks(items([chunk("stop", "answer"), tail]))]
+                self.assertEqual(output[-1].provider_error["code"], "PROVIDER_INCOMPLETE")
+
     async def test_engine_does_not_dispatch_partial_batch_or_retry_filtered_completion(
         self,
     ):
