@@ -30,6 +30,8 @@ else:
         stage = "lint"
     elif "unittest" in args:
         stage = "unit"
+    elif "evals.adversarial" in args:
+        stage = "adversarial"
     elif "evals.runner" in args:
         stage = args[args.index("--kind") + 1]
     elif "scripts/capture_ragas_snapshot.py" in args:
@@ -94,11 +96,11 @@ class CheckScriptsTest(unittest.TestCase):
     def test_local_backend_success_is_offline_and_runs_all_checks(self):
         process, calls = self._run("backend/scripts/run_eval_suite.ps1")
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
-        self.assertEqual([call["stage"] for call in calls], ["lint", "unit", "contracts", "benchmark"])
+        self.assertEqual([call["stage"] for call in calls], ["lint", "unit", "contracts", "adversarial", "benchmark"])
         self.assertTrue(all(not call["has_key"] and call["memory_db"] and call["dotenv"] == "NUL" for call in calls))
 
     def test_each_backend_failure_stops_remaining_checks(self):
-        stages = ["lint", "unit", "contracts", "benchmark"]
+        stages = ["lint", "unit", "contracts", "adversarial", "benchmark"]
         for index, stage in enumerate(stages):
             with self.subTest(stage=stage):
                 process, calls = self._run("backend/scripts/run_eval_suite.ps1", fail=stage)
@@ -110,14 +112,14 @@ class CheckScriptsTest(unittest.TestCase):
         process, calls = self._run("scripts/check_all.ps1", relative=True)
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
         self.assertEqual([call["stage"] for call in calls], [
-            "lint", "unit", "contracts", "benchmark", "npm-ci", "npm-lint", "npm-typecheck", "npm-test", "npm-build",
+            "lint", "unit", "contracts", "adversarial", "benchmark", "npm-ci", "npm-lint", "npm-typecheck", "npm-test", "npm-build",
         ])
         self.assertIn("All checks passed", process.stdout)
 
     def test_docker_mode_builds_checks_image_without_production_compose(self):
         process, calls = self._run("backend/scripts/run_eval_suite.ps1", mode="Docker")
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
-        self.assertEqual([call["stage"] for call in calls], ["docker-info", "docker-build", "lint", "unit", "contracts", "benchmark"])
+        self.assertEqual([call["stage"] for call in calls], ["docker-info", "docker-build", "lint", "unit", "contracts", "adversarial", "benchmark"])
         self.assertTrue(all(not call["compose"] for call in calls))
 
     def test_docker_build_failure_stops_before_tests(self):
@@ -132,7 +134,7 @@ class CheckScriptsTest(unittest.TestCase):
         self.assertNotIn("All checks passed", process.stdout)
 
     def test_each_frontend_failure_stops_remaining_checks(self):
-        stages = ["lint", "unit", "contracts", "benchmark", "npm-ci", "npm-lint", "npm-typecheck", "npm-test", "npm-build"]
+        stages = ["lint", "unit", "contracts", "adversarial", "benchmark", "npm-ci", "npm-lint", "npm-typecheck", "npm-test", "npm-build"]
         for stage in stages[4:]:
             with self.subTest(stage=stage):
                 process, calls = self._run("scripts/check_all.ps1", fail=stage)

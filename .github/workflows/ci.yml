@@ -60,6 +60,9 @@ jobs:
       - name: Run offline contract evals
         working-directory: backend
         run: python -m evals.runner --kind contracts
+      - name: Run offline adversarial evals
+        working-directory: backend
+        run: python -m evals.adversarial
       - name: Run offline workflow evals
         working-directory: backend
         run: python -m evals.runner --kind benchmark --quality-evaluator none --results-dir ../.check-results/evals

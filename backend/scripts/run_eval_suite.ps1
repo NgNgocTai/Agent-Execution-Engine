@@ -32,6 +32,7 @@ try {
         @{ Label = 'Backend lint'; Args = @('-m', 'ruff', 'check', '.') },
         @{ Label = 'Backend unit and integration tests'; Args = @('-m', 'unittest', 'discover', '-s', 'tests', '-v') },
         @{ Label = 'Offline contract evals'; Args = @('-m', 'evals.runner', '--kind', 'contracts') },
+        @{ Label = 'Offline adversarial evals'; Args = @('-m', 'evals.adversarial') },
         @{ Label = 'Offline workflow evals'; Args = @('-m', 'evals.runner', '--kind', 'benchmark', '--quality-evaluator', 'none', '--results-dir') }
     )
     foreach ($step in $steps) {
