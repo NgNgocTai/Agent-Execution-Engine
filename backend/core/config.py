@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # answer with fabricated/missing citations or unsupported numbers is an error.
     evidence_enforcement: Literal["off", "warn", "strict"] = "warn"
     evidence_stale_seconds: int = Field(default=900, ge=1, le=604800)
+    # Tables whose column metadata the agent may discover. Default: exactly the
+    # tables the backend query templates already read. No row data is exposed.
+    schema_discovery_clickhouse_tables: str = Field(default="alarm", pattern=r"^[a-z_][a-z0-9_]*(,[a-z_][a-z0-9_]*)*$|^$")
+    schema_discovery_postgres_tables: str = Field(default="device,station,vendor,error", pattern=r"^[a-z_][a-z0-9_]*(,[a-z_][a-z0-9_]*)*$|^$")
     ssh_host: str = ""
     ssh_user: str = ""
     ssh_password: str = ""

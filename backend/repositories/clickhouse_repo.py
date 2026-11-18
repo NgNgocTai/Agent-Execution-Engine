@@ -148,6 +148,17 @@ class AlarmRepository:
             for row in result.result_rows
         ], total
 
+    def describe_tables(self, tables: list[str]) -> list[dict]:
+        """Column metadata of the given tables in the configured database only."""
+        result = self._query(
+            "SELECT table, name, type FROM system.columns "
+            "WHERE database = currentDatabase() AND has(%(tables)s, table) "
+            "ORDER BY table, position",
+            parameters={"tables": list(tables)},
+            settings={"max_execution_time": 10},
+        )
+        return [{"table": row[0], "column": row[1], "type": row[2]} for row in result.result_rows]
+
     def _query(self, *args, **kwargs):
         # A ClickHouse HTTP session must not have concurrent queries.
         if not self._query_lock.acquire(timeout=10):

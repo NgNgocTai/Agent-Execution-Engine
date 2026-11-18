@@ -53,6 +53,21 @@ class DeviceRepository:
         )
         return [dict(row) for row in rows]
 
+    async def describe_tables(self, tables: list[str]) -> list[dict]:
+        """Column metadata of the given tables in the connection's schema only."""
+        rows = await self._pool.fetch(
+            "SELECT table_name, column_name, data_type, is_nullable "
+            "FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ANY($1::text[]) "
+            "ORDER BY table_name, ordinal_position",
+            list(tables),
+        )
+        return [
+            {"table": row["table_name"], "column": row["column_name"], "type": row["data_type"],
+             "nullable": row["is_nullable"] == "YES"}
+            for row in rows
+        ]
+
     async def find_device_candidates(self, *, device_name="", ip_address="", device_id=""):
         column, value = ("d.device_id", device_id) if device_id else ("d.ip_address", ip_address) if ip_address else ("d.name", device_name)
         rows = await self._pool.fetch(
