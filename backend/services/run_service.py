@@ -282,6 +282,9 @@ async def cancel_run(session, run_id):
         )
     )
     if changed.rowcount:
+        from services.interventions import settle
+
+        await settle(session, run_id)
         # Fence the worker before the cancellation event is committed.
         await session.execute(
             update(RunJob)

@@ -172,7 +172,10 @@ class RunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await routes.snapshot(run.id))["status"], "waiting_approval")
         config = json.loads(run.execution_config)
         self.enterContext(patch.object(settings, "openai_model", "changed-while-awaiting-approval"))
-        await routes.intervene(run.id, routes.InterventionRequest(message="Include a clear follow-up recommendation"))
+        accepted = await routes.intervene(run.id, routes.InterventionRequest(message="Include a clear follow-up recommendation"))
+        self.assertTrue(accepted["intervention_id"])
+        waiting = (await routes.snapshot(run.id))["interventions"]
+        self.assertEqual([(i["id"], i["status"], i["delivered_at"]) for i in waiting], [(accepted["intervention_id"], "pending", None)])
         async with self.sessions() as session:
             original = await session.scalar(select(PendingApproval).where(PendingApproval.conversation_id == run.conversation_id))
             self.assertEqual(json.loads(original.approval_metadata)["command"], "docker restart api")
@@ -190,6 +193,33 @@ class RunTest(unittest.IsolatedAsyncioTestCase):
             executions = (await session.scalars(select(ToolExecution).where(ToolExecution.run_id == run.id))).all()
             self.assertEqual({execution.call_id for execution in executions}, {"one", "two"})
         self.assertTrue(any("Operator intervention" in (message.get("content") or "") for message in snapshot["messages"]))
+        self.assertEqual([(i["status"], i["delivered_at"] is not None) for i in snapshot["interventions"]], [("delivered", True)])
+
+    async def test_intervention_of_a_cancelled_run_is_reported_undelivered(self):
+        from services.interventions import effective_status, settle
+        from repositories.run_models import RunIntervention
+        run = await self.create()
+        async with self.sessions() as session:
+            run_row = await session.get(Run, run.id)
+            run_row.status = "waiting_approval"
+            await session.execute(update(RunJob).where(RunJob.run_id == run.id).values(status="waiting_approval"))
+            session.add(RunCheckpoint(run_id=run.id, version=1, state=json.dumps({"version": 1, "messages": [], "pending_calls": [{"call_id": "c", "tool_name": "t", "arguments": {}}], "iteration": 1, "total_tool_calls": 0, "executed_tools": [], "interventions": [], "budget": {}})))
+            await session.commit()
+        accepted = await routes.intervene(run.id, routes.InterventionRequest(message="Please also check the neighbours"))
+        self.assertEqual((await routes.snapshot(run.id))["interventions"][0]["status"], "pending")
+        async with self.sessions() as session:
+            await cancel_run(session, run.id)
+            await session.commit()
+        listed = (await routes.snapshot(run.id))["interventions"]
+        self.assertEqual([(i["id"], i["status"], i["delivered_at"]) for i in listed], [(accepted["intervention_id"], "undelivered", None)])
+        async with self.sessions() as session:
+            self.assertEqual(await settle(session, run.id), 0)  # idempotent
+            stored = await session.scalar(select(RunIntervention.status).where(RunIntervention.id == accepted["intervention_id"]))
+            self.assertEqual(stored, "undelivered")
+        # A stuck pending row of a finished run is never presented as pending.
+        self.assertEqual(effective_status(type("Row", (), {"status": "pending"})(), "failed"), "undelivered")
+        self.assertEqual(effective_status(type("Row", (), {"status": "pending"})(), "running"), "pending")
+        self.assertEqual(effective_status(type("Row", (), {"status": "delivered"})(), "failed"), "delivered")
 
 
 @unittest.skipUnless(os.environ.get("APPROVAL_TEST_POSTGRES_URL"), "Disposable PostgreSQL URL is not configured")

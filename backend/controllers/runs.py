@@ -14,6 +14,7 @@ from repositories.engine import async_session
 from repositories.conversation_repo import ConversationRepository
 from repositories.approval_repo import ApprovalRepository
 from repositories.run_models import Run, RunEvent, RunJob, RunCheckpoint, RunStep
+from services.interventions import listing
 from services.run_service import (
     TERMINAL,
     create_run,
@@ -143,6 +144,7 @@ async def snapshot(run_id: str):
                 }
                 for step in steps
             ],
+            "interventions": await listing(session, run_id, run.status),
             "events": [
                 {
                     "sequence": event.sequence,
@@ -290,8 +292,11 @@ async def intervene(run_id: str, req: InterventionRequest):
         interventions = state.get("interventions", [])
         if len(interventions) >= 5:
             raise HTTPException(429, "Checkpoint intervention limit reached")
+        from services.interventions import record
+
         state["interventions"] = [*interventions, redact(req.message)]
         checkpoint.state = json.dumps(state, ensure_ascii=False)
+        intervention_id = await record(session, run_id, redact(req.message))
         await append_event(
             session,
             run_id,
@@ -299,7 +304,8 @@ async def intervene(run_id: str, req: InterventionRequest):
             {"message": "Operator intervention accepted for the next safe checkpoint"},
         )
         await session.commit()
-        return {"status": "accepted", "applies_after": "current_tool_batch"}
+        # "accepted" is not "applied": poll the run snapshot for delivered/undelivered.
+        return {"status": "accepted", "applies_after": "current_tool_batch", "intervention_id": intervention_id}
 
 
 @router.post("/runs/{run_id}/approve")

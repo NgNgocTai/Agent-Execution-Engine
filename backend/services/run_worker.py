@@ -199,6 +199,10 @@ class RunWorker:
                             .where(RunJob.run_id == run_id)
                             .values(status=status, lease_until=None)
                         )
+                        if status != "waiting_approval":
+                            from services.interventions import settle
+
+                            await settle(session, run_id)
                         await audit(session, "run." + status, run_id)
                     if (
                         event.type == AgentEventType.TOOL_CALL_RESULT
@@ -216,6 +220,10 @@ class RunWorker:
                         applied = (
                             event.data.get("content") == "Operator intervention applied"
                         )
+                        if applied:
+                            from services.interventions import mark_delivered
+
+                            await mark_delivered(session, run_id)
                         await append_event(
                             session,
                             run_id,
