@@ -51,3 +51,14 @@ class MigrationTest(unittest.TestCase):
                 adopt_legacy(connection)
             self.assertNotIn("alembic_version", inspect(connection).get_table_names())
         engine.dispose()
+
+
+class RequestedSkillMigrationTest(unittest.TestCase):
+    def test_runs_gain_a_nullable_requested_skill_column(self):
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            upgrade(connection)
+            columns = {c["name"]: c for c in inspect(connection).get_columns("runs")}
+            self.assertIn("requested_skill", columns)
+            self.assertTrue(columns["requested_skill"]["nullable"])
+        engine.dispose()

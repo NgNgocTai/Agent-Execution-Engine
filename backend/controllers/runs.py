@@ -32,6 +32,7 @@ class CreateRunRequest(BaseModel):
     message: str = Field(min_length=1, max_length=5000)
     provider: Literal["mock", "openai", "anthropic", "deepseek"] = "mock"
     conversation_id: str | None = Field(default=None, max_length=36)
+    skill: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,99}$")
     idempotency_key: str = Field(
         default_factory=lambda: uuid4().hex, min_length=1, max_length=100
     )

@@ -27,6 +27,7 @@ class Run(Base):
         ForeignKey("messages.id"), nullable=True
     )
     selected_skill_versions: Mapped[str] = mapped_column(Text, default="{}")
+    requested_skill: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="queued")
     active_key: Mapped[str | None] = mapped_column(
         String(36), unique=True, nullable=True

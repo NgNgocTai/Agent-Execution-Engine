@@ -107,6 +107,7 @@ def public_run(run):
         "run_id": run.id,
         "conversation_id": run.conversation_id,
         "provider": run.provider,
+        "skill": run.requested_skill or "auto",
         "configuration": configuration_summary(run.execution_config),
         "user_message_id": run.user_message_id,
         "status": run.status,
@@ -117,7 +118,9 @@ def public_run(run):
     }
 
 
-async def create_run(session, *, message, provider, conversation_id, idempotency_key):
+async def create_run(
+    session, *, message, provider, conversation_id, idempotency_key, skill=None
+):
     actor = principal()
     from sqlalchemy import func
 
@@ -135,7 +138,11 @@ async def create_run(session, *, message, provider, conversation_id, idempotency
         .where(ActorAdmission.actor == actor.subject)
         .values(touched_at=utcnow())
     )
-    canonical = json.dumps([message, provider, conversation_id], ensure_ascii=False)
+    # Auto-mode hashes stay identical to pre-selection runs for safe retries.
+    canonical = json.dumps(
+        [message, provider, conversation_id] + ([skill] if skill else []),
+        ensure_ascii=False,
+    )
     request_hash = hashlib.sha256(canonical.encode()).hexdigest()
     existing = await session.scalar(
         select(Run).where(
@@ -156,6 +163,11 @@ async def create_run(session, *, message, provider, conversation_id, idempotency
         raise HTTPException(
             429, "Active run limit reached; wait, cancel or reconcile an existing run"
         )
+    if skill:
+        from services.skill_catalog import requestable_skill
+
+        if not await requestable_skill(session, skill):
+            raise HTTPException(422, "Requested skill is not available")
     from services.run_configuration import capture_configuration
     try:
         execution_config = capture_configuration(provider)
@@ -187,6 +199,7 @@ async def create_run(session, *, message, provider, conversation_id, idempotency
         conversation_id=conversation.id,
         actor=actor.subject,
         provider=provider,
+        requested_skill=skill,
         execution_config=execution_config,
         user_message=message,
         status="queued",
