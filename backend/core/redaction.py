@@ -19,6 +19,16 @@ PRIVATE_KEY = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.S
 )
 BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+# Credentials with a recognisable shape are masked even without a "key=" label.
+TOKEN_FORMATS = re.compile(
+    r"\bsk-[A-Za-z0-9_-]{16,}"
+    r"|\bAKIA[0-9A-Z]{16}\b"
+    r"|\bgh[pousr]_[A-Za-z0-9]{30,}"
+    r"|\bgithub_pat_[A-Za-z0-9_]{20,}"
+    r"|\bxox[abprs]-[A-Za-z0-9-]{10,}"
+    r"|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+)
+SPOKEN_PASSWORD = re.compile(r"(?i)\b(password|passwd|passphrase)(\s+(?:is|was)\s+)(\S+)")
 URL_PASSWORD = re.compile(r"(://[^:/\s]+:)[^@\s]+(@)")
 QUOTED_ASSIGNMENT = re.compile(
     r"""(?i)(\b(?:password|passwd|secret|[\w-]*token|api[_-]?key|private[_-]?key|authorization)\b["']?\s*[:=]\s*)(["'])(?:\\.|(?!\2).)*?\2"""
@@ -52,6 +62,8 @@ def redact(value):
             value = value.replace(secret, MASK)
     value = PRIVATE_KEY.sub(MASK, value)
     value = BEARER.sub("Bearer " + MASK, value)
+    value = TOKEN_FORMATS.sub(MASK, value)
+    value = SPOKEN_PASSWORD.sub(lambda match: match[1] + match[2] + MASK, value)
     value = URL_PASSWORD.sub(r"\1" + MASK + r"\2", value)
     value = QUOTED_ASSIGNMENT.sub(
         lambda match: match[1] + match[2] + MASK + match[2], value
