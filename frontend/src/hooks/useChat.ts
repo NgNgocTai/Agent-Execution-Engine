@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../types";
 import { approveAction, getConversationMessages } from "../lib/api";
 import { cancelRun, decideRun, getRunOptions, getRuns, startRun, interveneRun, reconcileRun, type RunSummary } from "../lib/runs";
-import { AUTO_SKILL, resolveSkill, type SkillOption } from "../lib/runOptions";
+import { AUTO_SKILL, resolveSkill, type ProviderStatus, type SkillOption } from "../lib/runOptions";
 import { activeStatus, emptyRun } from "../lib/runReducer";
 import { chatHistory, chatMessage } from "../lib/chatHistory";
 import { readSSE } from "../lib/sse";
@@ -14,6 +14,7 @@ export function useChat() {
   const [currentProvider, setCurrentProvider] = useState("openai");
   const [run, setRun] = useState<RunSummary | null>(null);
   const [skills, setSkills] = useState<SkillOption[]>([]);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<string>(AUTO_SKILL);
   const [epoch, setEpoch] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +49,7 @@ export function useChat() {
 
   useEffect(() => {
     const controller = new AbortController();
-    getRunOptions(controller.signal).then(result => { setSkills(result.skills); setSelectedSkill(current => resolveSkill(current, result.skills)); }).catch(() => undefined);
+    getRunOptions(controller.signal).then(result => { setSkills(result.skills); setProviderStatus(result.providers ?? []); setSelectedSkill(current => resolveSkill(current, result.skills)); }).catch(() => undefined);
     return () => controller.abort();
   }, []);
   useEffect(() => {
@@ -122,6 +123,6 @@ export function useChat() {
     setHistory(previous => previous.map(item => ({ ...item, toolCallCards: item.toolCallCards.map(card => card.callId === callId ? { ...card, showInput } : card) })));
   }, [setState]);
   const live: ChatMessage[] = state ? [{ ...chatMessage("assistant", state.text), toolCallCards: state.cards, isStreaming: activeStatus(state.status) }] : [];
-  return { messages: [...history, ...live], conversationId, currentProvider, skills, selectedSkill, setSelectedSkill, activeRun: run, isStreaming, send, newChat, switchProvider, toggleTab, loadConversation, approveDecision, stop,
+  return { messages: [...history, ...live], conversationId, currentProvider, skills, providerStatus, selectedSkill, setSelectedSkill, activeRun: run, isStreaming, send, newChat, switchProvider, toggleTab, loadConversation, approveDecision, stop,
     runStatus: state?.status || null, connection, timeline: state?.timeline || [], error: error || state?.error || null, notice, intervene, reconcile };
 }

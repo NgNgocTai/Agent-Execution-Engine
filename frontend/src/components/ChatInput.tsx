@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, ChevronDown } from "lucide-react";
 import type { ProviderOption } from "../types";
-import { AUTO_SKILL, skillLabel, type SkillOption } from "../lib/runOptions";
+import { AUTO_SKILL, skillLabel, type ProviderStatus, type SkillOption } from "../lib/runOptions";
 
 interface Props {
   onSend: (message: string) => void;
@@ -10,6 +10,7 @@ interface Props {
   onSwitchProvider: (provider: string) => void;
   providers: ProviderOption[];
   skills?: SkillOption[];
+  providerStatus?: ProviderStatus[];
   selectedSkill?: string;
   onSelectSkill?: (skill: string) => void;
 }
@@ -20,12 +21,14 @@ const FALLBACK_PROVIDER: ProviderOption = {
   color: "#0050cb",
 };
 
-export default function ChatInput({ onSend, isStreaming, currentProvider, onSwitchProvider, providers, skills = [], selectedSkill = AUTO_SKILL, onSelectSkill }: Props) {
+export default function ChatInput({ onSend, isStreaming, currentProvider, onSwitchProvider, providers, skills = [], providerStatus = [], selectedSkill = AUTO_SKILL, onSelectSkill }: Props) {
   const [message, setMessage] = useState("");
   const [showProviders, setShowProviders] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const provider = providers.find((p) => p.id === currentProvider) || providers[0] || FALLBACK_PROVIDER;
+  const statusOf = (id: string) => providerStatus.find((s) => s.id === id);
+  const current = statusOf(provider.id);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -35,7 +38,8 @@ export default function ChatInput({ onSend, isStreaming, currentProvider, onSwit
   }, [message]);
 
   const handleSend = () => {
-    if (message.trim() && !isStreaming) {
+    // Enter must obey the same rule as the button: no run on a provider the server cannot use.
+    if (message.trim() && !isStreaming && current?.available !== false) {
       onSend(message.trim());
       setMessage("");
     }
@@ -85,6 +89,8 @@ export default function ChatInput({ onSend, isStreaming, currentProvider, onSwit
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: provider.color }}></span>
               <span>{provider.label}</span>
+              {current?.model && <span className="font-normal text-[#727687] max-w-[120px] truncate" title={current.model}>{current.model}</span>}
+              {current && !current.available && <span role="alert" className="text-red-700">unavailable</span>}
               <ChevronDown size={12} />
             </button>
             {showProviders && (
@@ -92,6 +98,8 @@ export default function ChatInput({ onSend, isStreaming, currentProvider, onSwit
                 {providers.map((p) => (
                   <button
                     key={p.id}
+                    disabled={statusOf(p.id)?.available === false}
+                    title={statusOf(p.id)?.reason ?? statusOf(p.id)?.model}
                     onClick={() => {
                       onSwitchProvider(p.id);
                       setShowProviders(false);
@@ -102,6 +110,7 @@ export default function ChatInput({ onSend, isStreaming, currentProvider, onSwit
                   >
                     <span className="w-2 h-2 rounded-full" style={{ background: p.color }}></span>
                     {p.label}
+                    {statusOf(p.id)?.available === false && <span className="font-normal text-[#727687]"> · no key</span>}
                   </button>
                 ))}
               </div>
@@ -109,7 +118,7 @@ export default function ChatInput({ onSend, isStreaming, currentProvider, onSwit
           </div>
           <button
             onClick={handleSend}
-            disabled={!message.trim() || isStreaming}
+            disabled={!message.trim() || isStreaming || current?.available === false}
             className="w-10 h-10 flex items-center justify-center bg-[#0050cb] text-white rounded-full transition-transform active:scale-95 shadow-md hover:bg-[#003fa4] disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Send size={18} className="translate-x-[1px]" />

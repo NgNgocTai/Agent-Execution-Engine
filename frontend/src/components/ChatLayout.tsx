@@ -43,7 +43,7 @@ export default function ChatLayout() {
   const {
     messages, conversationId, isStreaming, currentProvider,
     send, newChat, switchProvider, toggleTab, loadConversation, approveDecision,
-    stop, runStatus, connection, timeline, error, notice, intervene, reconcile, skills, selectedSkill, setSelectedSkill, activeRun,
+    stop, runStatus, connection, timeline, error, notice, intervene, reconcile, skills, providerStatus, selectedSkill, setSelectedSkill, activeRun,
   } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -220,6 +220,7 @@ export default function ChatLayout() {
         <RunHistory conversationId={conversationId} refreshKey={`${activeRun?.run_id ?? ""}:${runStatus ?? ""}`} />
         <ChatInput
           skills={skills}
+          providerStatus={providerStatus}
           selectedSkill={selectedSkill}
           onSelectSkill={setSelectedSkill}
           onSend={send}

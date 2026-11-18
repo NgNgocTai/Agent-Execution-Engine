@@ -1,5 +1,6 @@
 // Pure helpers (no imports) so they can be unit tested without a browser.
 export interface SkillOption { name: string; kind: "auto" | "builtin" | "custom"; description: string; version?: string }
+export interface ProviderStatus { id: string; model: string; available: boolean; reason: string | null }
 export const AUTO_SKILL = "auto";
 
 /** Body for POST /runs. "auto" is expressed by omitting skill, never by sending it. */
