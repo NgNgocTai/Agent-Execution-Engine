@@ -92,7 +92,7 @@ def observation(data, retrieved):
 
 def evidence(skill, arguments, data):
     fixture = type(skill).__module__.startswith("evals.") or any(type(getattr(skill, name, None)).__module__.startswith("evals.") for name in ("alarm_repo", "device_repo"))
-    source = {"node_health_remediate": "ssh", "device_inventory_lookup": "inventory+alarms", "alarm_statistics": "alarms+error_catalog", "noc_alarm_enrichment": "alarms+inventory", "site_inventory": "inventory", "site_alarm_overview": "alarms+inventory"}.get(skill.name, "skill")
+    source = {"node_health_remediate": "ssh", "device_inventory_lookup": "inventory+alarms", "alarm_statistics": "alarms+error_catalog", "noc_alarm_enrichment": "alarms+inventory", "site_inventory": "inventory", "site_alarm_overview": "alarms+inventory", "schema_catalog": "schema"}.get(skill.name, "skill")
     payload = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
     retrieved = datetime.now(timezone.utc)
     facts = observation(data, retrieved)

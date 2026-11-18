@@ -106,6 +106,7 @@ class IsolationTest(unittest.IsolatedAsyncioTestCase):
                 "device_inventory_lookup",
                 "site_inventory",
                 "site_alarm_overview",
+                "schema_catalog",
             },
         )
         self.assertTrue(any(isinstance(r, ConnectorHub) for r in resources))

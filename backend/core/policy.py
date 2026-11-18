@@ -50,6 +50,9 @@ def plan(tool_name, arguments, brokered=False):
         # Row scope is enforced inside the capability (before any query), so
         # site-restricted principals may call it for their own sites only.
         return Decision.ALLOW
+    if tool_name == "schema_catalog":
+        # Column names and types of allow-listed tables; no rows from any site.
+        return Decision.ALLOW
     if tool_name in GUIDE_TOOLS:
         # Reads reviewed package text, never site data, so restricted
         # principals may read the instructions they need to use a skill.

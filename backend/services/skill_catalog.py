@@ -21,6 +21,7 @@ BUILTIN_SKILL_NAMES = (
     "node_health_remediate",
     "site_inventory",
     "site_alarm_overview",
+    "schema_catalog",
 )
 SHORT_DESCRIPTION = 600
 
@@ -70,6 +71,7 @@ def builtin_manifest(skill):
             "noc_alarm_enrichment": ["alarms", "inventory"],
             "site_inventory": ["inventory"],
             "site_alarm_overview": ["alarms", "inventory"],
+            "schema_catalog": ["alarms", "inventory"],
         }.get(skill.name, []),
         "evidence_contract": "source, retrieved_at, observed_at, entity, time_window_minutes, warnings",
     }
