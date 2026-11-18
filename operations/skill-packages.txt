@@ -242,3 +242,25 @@ broker enforces row scope; the data it returns is limited to their sites.
 Rollout: new built-in names change the pinned built-in catalog, so finish or
 cancel queued/waiting runs before deploying (as for migration 0010); old runs
 fail with "Built-in catalog changed" instead of silently gaining tools.
+
+Example: site-alarm-triage (P2-01, partial by design)
+-----------------------------------------------------
+skill_examples/site-alarm-triage is a reviewed-style Agent Skill package (SKILL.md,
+references/scoring.md, runtime.json, one script) using the site_alarms broker
+capability. Build and upload it like any package (zip the folder). It ranks one
+site's ACTIVE alarms: severity-weighted score with per-severity cap, device and
+error-code spread, explainable drivers, top error codes, newest/oldest alarm time,
+calibration "uncalibrated-v0", output validated by a reviewed output_schema.
+It was written for the data this system really has. The reference project's
+ran-kpi-anomaly-triage and core-link-impact-summary rank KPI and link records
+(latency, packet loss, throughput, link_id) and fall back to built-in SAMPLE
+records when none are given. Neither the alarm table nor the inventory here has
+KPI or link fields, so those algorithms were NOT ported; porting them without
+data would mean inventing it. This package never falls back to samples: missing
+records fail the call, and "no alarms" is reported as none_observed, not healthy.
+Still needed for the full P2-01 (cannot be done from code alone):
+ - a KPI source (cell/site KPI series with unit and observed time) and a link or
+   topology table (link_id, endpoints), exposed as new backend capabilities;
+ - maintenance-window data so planned work does not score as an incident;
+ - NOC-labelled holdout cases (top impacted sites, known false positives) to
+   calibrate the weights; until then the score is a ranking aid only.
