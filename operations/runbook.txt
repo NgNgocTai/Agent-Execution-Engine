@@ -16,8 +16,10 @@ Reports/logs are written under .check-results (ignored by Git).
 
 Development stack
 -----------------
-docker compose --env-file .env.example up --build --detach
-Open http://localhost:8080. The root Compose file defaults to DATA_MODE=fixture,
+make up   (or: DATA_MODE=fixture docker compose --env-file .env.example up --build --detach)
+Open http://localhost:8080. DATA_MODE=fixture must be set in the shell: .env.example
+sets DATA_MODE=live and --env-file feeds interpolation, so plain `docker compose
+--env-file .env.example up` runs LIVE mode with fake credentials. The stack uses
 an external worker and a dedicated PostgreSQL control database. The mock UI
 does not represent live network state. Ports bind to localhost. The old
 backend/docker-compose.yml is retained for compatibility; prefer root compose.yml.

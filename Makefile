@@ -68,21 +68,27 @@ e2e: ## Playwright browser tests against fixtures (needs `npx playwright install
 check-frontend: lint-frontend typecheck test-frontend build-frontend e2e ## Everything the frontend CI job runs
 
 # --- Local stack (fixture data, external worker, PostgreSQL control database) ----------------
+# .env.example sets DATA_MODE=live and --env-file feeds compose interpolation, so without an
+# explicit override the "development" stack would try real data sources with fake credentials.
+# A shell variable wins over --env-file, so pin fixture data here. Override: make up STACK_DATA_MODE=live
+STACK_DATA_MODE ?= fixture
+WEB_PORT ?= 8080
+STACK := DATA_MODE=$(STACK_DATA_MODE) NOC_WEB_PORT=$(WEB_PORT) $(COMPOSE) --env-file .env.example
 
-up: ## Build and start the development stack on http://localhost:8080
-	$(COMPOSE) --env-file .env.example up --build --detach
+up: ## Build and start the fixture stack on http://localhost:8080 (WEB_PORT=... to change)
+	$(STACK) up --build --detach
 
 down: ## Stop the development stack (keeps the database volume)
-	$(COMPOSE) --env-file .env.example down
+	$(STACK) down
 
 logs: ## Follow stack logs
-	$(COMPOSE) --env-file .env.example logs -f
+	$(STACK) logs -f
 
 ps: ## Show stack status
-	$(COMPOSE) --env-file .env.example ps
+	$(STACK) ps
 
 migrate: ## Run control database migrations (the `migrate` compose service)
-	$(COMPOSE) --env-file .env.example run --rm migrate
+	$(STACK) run --rm migrate
 
 clean: ## Remove lint/browser caches only; .check-results (saved run logs) is left alone
 	rm -rf .ruff_cache backend/.ruff_cache frontend/playwright-report frontend/test-results
