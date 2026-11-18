@@ -3,6 +3,7 @@ from core.clock import utcnow
 """Database job ownership and fencing. No automatic retry of uncertain work."""
 from datetime import timedelta
 import json
+import time
 from sqlalchemy import select, update, exists
 
 from repositories.run_models import Run, RunJob, ToolExecution
@@ -148,6 +149,10 @@ class DurableExecutor:
 
     async def execute_call(self, call):
         arguments = json.dumps(call.arguments, ensure_ascii=False, sort_keys=True)
+        registry = getattr(self.executor, "registry", None)
+        skill = registry.get(call.tool_name) if registry else None
+        # Attribution for telemetry: the pinned package version, or "builtin".
+        skill_ref = str(getattr(skill, "version_id", None) or "builtin")[:64]
         async with self.sessions() as session:
             await fence(session, self.run_id, self.token)
             existing = await session.scalar(
@@ -176,12 +181,16 @@ class DurableExecutor:
                     status="running",
                     is_write=call.tool_name == "node_health_remediate"
                     and call.arguments.get("dry_run", True) is False,
+                    started_at=utcnow(),
+                    skill_ref=skill_ref,
                 )
             )
             await session.commit()
         # The durable claim above is the authorization point. A cancellation
         # racing a dispatched connector cannot retract its remote side effect.
+        began = time.monotonic()
         result = await self.executor.execute(call.tool_name, call.arguments)
+        duration_ms = int((time.monotonic() - began) * 1000)
         async with self.sessions() as session:
             await fence(session, self.run_id, self.token)
             await session.execute(
@@ -194,6 +203,7 @@ class DurableExecutor:
                     if result.success
                     else "failed",
                     result=result.model_dump_json(),
+                    duration_ms=duration_ms,
                 )
             )
             await session.commit()

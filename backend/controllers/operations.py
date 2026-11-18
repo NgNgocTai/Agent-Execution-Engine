@@ -1,7 +1,7 @@
 import json
 from datetime import timedelta
 from typing import Literal
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select, func, update
 from core.auth import require
@@ -40,6 +40,15 @@ def require_dispatch_window_closed(approval):
             409,
             f"Wait {math.ceil(remaining)} seconds for the possible dispatch window to close, then verify the remote outcome again",
         )
+
+
+@router.get("/skill-stats")
+async def skill_statistics(days: int = Query(7, ge=1, le=90)):
+    require("viewer", "operator", "approver")
+    from services.skill_stats import skill_stats
+
+    async with async_session() as session:
+        return await skill_stats(session, days)
 
 
 @router.get("/connectors")
