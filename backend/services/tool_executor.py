@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from core.policy import Decision, plan
 from core.redaction import redact
 from services.connectors import ConnectorUnavailable
+from services.site_capabilities import SiteError
 from services.evidence import evidence
 from core.config import settings
 
@@ -38,7 +39,7 @@ class ToolExecutor:
             except ValidationError as exc:
                 fields = [".".join(str(part) for part in error["loc"]) or "input" for error in exc.errors()]
                 return SkillResult(status=SkillStatus.BUSINESS_ERROR, data={"error_code": "INVALID_TOOL_INPUT", "fields": fields}, error="Invalid tool input: " + ", ".join(fields))
-        if plan(tool_name, arguments) == Decision.DENY:
+        if plan(tool_name, arguments, brokered=bool(getattr(skill, "capability", None))) == Decision.DENY:
             return SkillResult(status=SkillStatus.BUSINESS_ERROR, data={"error_code": "POLICY_DENIED"}, error="Target is outside the allowed action scope")
         try:
             result = await asyncio.wait_for(
@@ -60,6 +61,14 @@ class ToolExecutor:
                 data=None,
                 error=f"Tool '{tool_name}' timeout sau {SKILL_TIMEOUT_SECONDS}s.",
                 execution_time_ms=SKILL_TIMEOUT_SECONDS * 1000,
+            )
+
+        except SiteError as e:
+            return SkillResult(
+                status=SkillStatus.BUSINESS_ERROR,
+                data={"error_code": e.code, **e.detail},
+                error=str(e),
+                execution_time_ms=(time.monotonic() - start) * 1000,
             )
 
         except ConnectorUnavailable as e:

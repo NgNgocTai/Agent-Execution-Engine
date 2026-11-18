@@ -40,12 +40,16 @@ def target_allowed(host, service="", *, write=False):
     return True
 
 
-def plan(tool_name, arguments):
+def plan(tool_name, arguments, brokered=False):
     actor = principal()
     if not actor.roles.intersection({"operator", "admin"}):
         return Decision.DENY
     from services.skill_guides import GUIDE_TOOLS
 
+    if brokered or tool_name in {"site_inventory", "site_alarm_overview"}:
+        # Row scope is enforced inside the capability (before any query), so
+        # site-restricted principals may call it for their own sites only.
+        return Decision.ALLOW
     if tool_name in GUIDE_TOOLS:
         # Reads reviewed package text, never site data, so restricted
         # principals may read the instructions they need to use a skill.

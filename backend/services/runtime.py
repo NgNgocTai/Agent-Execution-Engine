@@ -21,6 +21,11 @@ async def create_runtime():
     hub = ConnectorHub()
     alarms, devices = hub.alarms, hub.devices
     registry = SkillRegistry()
+    registry.connector_hub = hub  # lets reviewed scripts use site capabilities
+    from services.skills.site_capabilities import SiteAlarmOverviewSkill, SiteInventorySkill
+
+    for skill in (SiteInventorySkill(hub), SiteAlarmOverviewSkill(hub)):
+        registry.register(skill)
     for skill in (NocAlarmEnrichmentSkill(alarms, devices),
                   AlarmStatisticsSkill(alarms, devices), DeviceInventoryLookupSkill(alarms, devices)):
         registry.register(skill)

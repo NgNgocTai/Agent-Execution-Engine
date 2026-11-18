@@ -100,7 +100,13 @@ class IsolationTest(unittest.IsolatedAsyncioTestCase):
         pg.assert_not_called()
         self.assertEqual(
             set(engine.skill_registry.list_names()),
-            {"noc_alarm_enrichment", "alarm_statistics", "device_inventory_lookup"},
+            {
+                "noc_alarm_enrichment",
+                "alarm_statistics",
+                "device_inventory_lookup",
+                "site_inventory",
+                "site_alarm_overview",
+            },
         )
         self.assertTrue(any(isinstance(r, ConnectorHub) for r in resources))
 

@@ -38,6 +38,11 @@ class InventoryInput(SkillInput):
         return self
 
 
+class SiteInput(SkillInput):
+    site: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9 _.:-]*$")
+    limit: int = Field(default=50, ge=1, le=100)
+
+
 class AlarmEnrichmentInput(SkillInput):
     alarm_type: str = Field(min_length=1, max_length=128)
     window_min: int = Field(default=10, ge=1, le=43200)
