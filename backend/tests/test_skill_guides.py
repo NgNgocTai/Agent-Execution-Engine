@@ -502,6 +502,21 @@ class RunOptionsTest(GuideFixture):
         self.assertLessEqual(len(skills[1]["description"]), 240)
         self.assertEqual(skills[2]["version"], "1.0.0")
 
+    async def test_provider_availability_and_model_come_from_server_config_without_keys(self):
+        from core.config import settings
+        from unittest.mock import patch
+
+        with patch.object(settings, "data_mode", "live"), patch.object(settings, "openai_api_key", "sk-secret-value-123456"),              patch.object(settings, "anthropic_api_key", ""), patch.object(settings, "deepseek_api_key", ""),              patch.object(settings, "openai_model", "gpt-test"):
+            body = (await self.get()).json()
+        providers = {p["id"]: p for p in body["providers"]}
+        self.assertEqual(set(providers), {"openai", "anthropic", "deepseek"})
+        self.assertEqual((providers["openai"]["available"], providers["openai"]["model"], providers["openai"]["reason"]), (True, "gpt-test", None))
+        self.assertFalse(providers["anthropic"]["available"])
+        self.assertIn("No API key", providers["anthropic"]["reason"])
+        self.assertNotIn("sk-secret-value-123456", json.dumps(body))
+        with patch.object(settings, "data_mode", "fixture"):
+            self.assertEqual([p["id"] for p in (await self.get()).json()["providers"]], ["mock"])
+
     async def test_options_route_is_not_captured_by_the_run_id_route_and_needs_a_role(self):
         self.assertEqual((await self.get()).status_code, 200)
         self.assertEqual((await self.get(roles=("guest",))).status_code, 403)

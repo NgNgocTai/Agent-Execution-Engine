@@ -99,7 +99,26 @@ async def run_options():
             manifest = json.loads(record.manifest)
             skills.append({"name": record.name, "kind": "custom", "version": record.version,
                            "description": str(manifest.get("description", ""))[:240]})
-    return {"skills": skills}
+    return {"skills": skills, "providers": provider_status()}
+
+
+def provider_status():
+    """Which providers can run now and with which model. Never returns a key."""
+    from controllers.chat import AVAILABLE_PROVIDERS
+    from core.config import settings
+
+    if settings.data_mode == "fixture":
+        return [{"id": "mock", "model": "mock", "available": True, "reason": None}]
+    result = []
+    for name in AVAILABLE_PROVIDERS:
+        configured = bool(getattr(settings, name + "_api_key", ""))
+        result.append({
+            "id": name,
+            "model": getattr(settings, name + "_model", ""),
+            "available": configured,
+            "reason": None if configured else "No API key configured on the server",
+        })
+    return result
 
 
 @router.get("/runs/{run_id}")
