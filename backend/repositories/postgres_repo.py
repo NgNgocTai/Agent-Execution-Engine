@@ -19,9 +19,39 @@ class DeviceRepository:
         self._pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
+        # Inventory reads only: sessions are read-only with a statement timeout.
         self._pool = await asyncpg.create_pool(
-            min_size=1, max_size=5, timeout=5, command_timeout=10, **self.conn_kwargs
+            min_size=1,
+            max_size=5,
+            timeout=5,
+            command_timeout=10,
+            server_settings={
+                "default_transaction_read_only": "on",
+                "statement_timeout": "10000",
+            },
+            **self.conn_kwargs,
         )
+
+    async def find_stations(self, key: str) -> list[dict]:
+        """Exact station id or case-insensitive exact name; never a pattern."""
+        rows = await self._pool.fetch(
+            "SELECT station_id, name FROM station "
+            "WHERE station_id = $1 OR lower(name) = lower($1) "
+            "ORDER BY station_id LIMIT 21",
+            key,
+        )
+        return [dict(row) for row in rows]
+
+    async def list_station_devices(self, station_id: str, limit: int) -> list[dict]:
+        rows = await self._pool.fetch(
+            "SELECT d.device_id, d.name, d.device_type, d.ip_address, "
+            "v.name AS vendor_name FROM device d "
+            "JOIN vendor v ON d.vendor_id = v.vendor_id "
+            "WHERE d.station_id = $1 ORDER BY d.device_id LIMIT $2",
+            station_id,
+            limit,
+        )
+        return [dict(row) for row in rows]
 
     async def find_device_candidates(self, *, device_name="", ip_address="", device_id=""):
         column, value = ("d.device_id", device_id) if device_id else ("d.ip_address", ip_address) if ip_address else ("d.name", device_name)

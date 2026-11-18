@@ -118,6 +118,36 @@ class AlarmRepository:
             logger.error("ClickHouse active alarms error: %s", e)
             raise RuntimeError("Alarm data source unavailable") from e
 
+    def get_active_alarms_by_devices(self, device_ids: list[str], limit: int) -> tuple[list[dict], int]:
+        """Active alarms for an explicit device list: parameterized, bounded."""
+        if not device_ids:
+            return [], 0
+        guard = {"max_execution_time": 10}
+        total = self._query(
+            "SELECT count(*) FROM alarm "
+            "WHERE has(%(ids)s, device_id) AND status = 'active'",
+            parameters={"ids": list(device_ids)},
+            settings=guard,
+        ).result_rows[0][0]
+        result = self._query(
+            "SELECT alarm_id, error_code, device_id, severity, time_created, status "
+            "FROM alarm WHERE has(%(ids)s, device_id) AND status = 'active' "
+            "ORDER BY time_created DESC LIMIT %(limit)s",
+            parameters={"ids": list(device_ids), "limit": limit},
+            settings=guard,
+        )
+        return [
+            {
+                "alarm_id": row[0],
+                "error_code": row[1],
+                "device_id": row[2],
+                "severity": row[3],
+                "time_created": str(row[4]),
+                "status": row[5],
+            }
+            for row in result.result_rows
+        ], total
+
     def _query(self, *args, **kwargs):
         # A ClickHouse HTTP session must not have concurrent queries.
         if not self._query_lock.acquire(timeout=10):
