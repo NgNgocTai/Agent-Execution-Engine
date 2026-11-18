@@ -14,6 +14,7 @@ from services.providers.gateway import complete
 from services.run_budget import RunBudget, BudgetExceeded
 from services.context_manager import ContextBudgetExceeded
 from services.skills.registry import SkillRegistry
+from services.skill_guides import GUIDE_TOOLS, instructions_loaded
 from services.tool_executor import ToolExecutor
 from services.skills.base import SkillStatus
 from services.skills.base import SkillResult
@@ -24,16 +25,28 @@ logger = logging.getLogger(__name__)
 MAX_ITERATIONS = 10
 
 
+def _run_start(messages, user_message):
+    """Index of this run's user message, so earlier runs' loads do not count."""
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].role == "user" and messages[index].content == user_message:
+            return index
+    return 0
+
+
 class AgentEngine:
     def __init__(
         self,
         tool_executor: ToolExecutor,
         skill_registry: SkillRegistry,
         tracer: LangfuseTracer | None = None,
+        required_skill: str | None = None,
     ) -> None:
         self.tool_executor = tool_executor
         self.skill_registry = skill_registry
         self.tracer = tracer
+        # Operator-selected skill: its instructions must be read before any
+        # other tool is used in the run.
+        self.required_skill = required_skill
 
     async def run(
         self,
@@ -60,6 +73,15 @@ class AgentEngine:
         # The provider context may contain only a truncated part of DB history.
         # Track the boundary here rather than slicing by the original history size.
         new_messages_start = len(messages)
+        if self.required_skill and checkpoint is None:
+            messages[0] = messages[0].model_copy(
+                update={
+                    "content": (messages[0].content or "")
+                    + f"\n\nThe operator selected skill '{self.required_skill}'. "
+                    f"First call load_skill with skill_name '{self.required_skill}', "
+                    "follow its instructions, and use only that skill's tools."
+                }
+            )
         tools = self.skill_registry.get_tool_schemas()
 
         global_executed_tools = set()
@@ -227,7 +249,20 @@ class AgentEngine:
                     else None
                 )
 
-                if tc_key in global_executed_tools:
+                if (
+                    self.required_skill
+                    and tc.tool_name not in GUIDE_TOOLS
+                    and not instructions_loaded(
+                        messages[_run_start(messages, user_message) :],
+                        self.required_skill,
+                    )
+                ):
+                    result = SkillResult(
+                        status=SkillStatus.BUSINESS_ERROR,
+                        data=None,
+                        error=f"Call load_skill with skill_name '{self.required_skill}' and read its instructions before using this tool.",
+                    )
+                elif tc_key in global_executed_tools:
                     result = SkillResult(
                         status=SkillStatus.BUSINESS_ERROR,
                         data=None,

@@ -107,6 +107,7 @@ class RunWorker:
                     ),
                     registry,
                     self.engine.tracer,
+                    required_skill=run.requested_skill,
                 )
 
                 async def save_checkpoint(state):
