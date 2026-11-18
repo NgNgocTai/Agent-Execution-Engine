@@ -104,7 +104,7 @@ export function useChat() {
   const intervene = useCallback(async (text: string) => {
     if (!run) return;
     const view = generation.current;
-    try { await interveneRun(run.run_id, text); if (view === generation.current) setNotice("Accepted. The intervention applies after the current tool batch; it does not change the approval action."); }
+    try { await interveneRun(run.run_id, text); if (view === generation.current) setNotice("Accepted, not yet applied. It is shown to the model after the current tool batch and never changes the approval action; Run history shows whether it was delivered or undelivered."); }
     catch (failure) { if (view === generation.current) setError((failure as Error).message); }
   }, [run]);
   const reconcile = useCallback(async (outcome: string, evidence: string) => {

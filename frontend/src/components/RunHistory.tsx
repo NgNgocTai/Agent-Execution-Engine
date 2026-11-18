@@ -59,6 +59,7 @@ export default function RunHistory({ conversationId, refreshKey }: Props) {
             {step.kind} <span className={TONE[statusTone(step.status)]}>{step.status}</span>
             {step.usage && <span className="text-[#727687]"> · {JSON.stringify(step.usage)}</span>}
           </li>)}</ol>
+          {(open.interventions ?? []).length > 0 && <ul className="mt-1" aria-label="Interventions">{(open.interventions ?? []).map(item => <li key={item.id}>Intervention <strong>{item.status}</strong>{item.status === "undelivered" ? " (the run ended before it was applied)" : item.status === "pending" ? " (waiting for the next safe checkpoint)" : ""}: {item.message}</li>)}</ul>}
           <p className="text-[#727687] mt-1">Inputs and outputs are redacted by the server.</p>
         </div>}
       </li>)}

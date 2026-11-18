@@ -3,8 +3,9 @@ import type { ConversationMessages } from "./api";
 import { runRequestBody, type SkillOption } from "./runOptions";
 
 export interface RunSummary { run_id: string; conversation_id: string; user_message_id?: number; provider: string; skill?: string; configuration?: Record<string, unknown> | null; status: string; sequence: number; error_code: string | null; created_at?: string; updated_at?: string }
+export interface InterventionView { id: string; message: string; status: "pending" | "delivered" | "undelivered"; created_at: string; delivered_at: string | null }
 export interface RunStepView { step_id: string; kind: string; status: string; started_at: string; finished_at: string | null; usage: Record<string, unknown> | null }
-export interface RunSnapshot extends RunSummary { messages: ConversationMessages["messages"]; pending_approvals: ConversationMessages["pending_approvals"]; steps?: RunStepView[] }
+export interface RunSnapshot extends RunSummary { messages: ConversationMessages["messages"]; pending_approvals: ConversationMessages["pending_approvals"]; steps?: RunStepView[]; interventions?: InterventionView[] }
 
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
