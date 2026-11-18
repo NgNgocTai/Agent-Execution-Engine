@@ -30,7 +30,7 @@ def archive():
 
 
 def alarm(i, severity="Critical", code="LINK_DOWN", device="d1"):
-    return {"alarm_id": i, "error_code": code, "device_id": device, "severity": severity,
+    return {"alarm_id": f"ALM-{i:010d}", "error_code": code, "device_id": device, "severity": severity,
             "time_created": f"2026-11-17 10:{i:02d}:00", "status": "active"}
 
 

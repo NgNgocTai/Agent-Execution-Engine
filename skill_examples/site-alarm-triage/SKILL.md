@@ -22,3 +22,5 @@ site is, or which alarm types and devices drive it.
 4. Never name a root cause. The output is an alarm-derived hint. KPI, latency,
    packet loss and link topology are NOT inputs; say that they were not checked.
 5. Relay `warnings` (unknown severities, truncated list) unchanged.
+6. Always state `newest_alarm_at`. If the tool evidence reports that the newest record is days
+   old, say the data may be stale or stopped and do not describe the site as currently affected.

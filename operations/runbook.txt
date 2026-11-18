@@ -365,3 +365,21 @@ checks scope again. Details are redacted. The UI shows the inbox to approvers an
 admins, refreshes every 15 s and after run changes, and "Open" loads the
 conversation where the existing approve/reject controls are; there is no one-click
 approve from the inbox, so the operator always sees the full context first.
+
+Findings from a run against the real alarm and inventory servers (18/11/2026)
+-----------------------------------------------------------------------------
+Read-only checks against ClickHouse 26.5 (alarm_data.alarm) and PostgreSQL 16
+(device, station, vendor, error) through the app's own connectors, plus an SSH metrics
+read. Everything below was found by that run, not by the fixtures:
+- alarm_id is a STRING (e.g. ALM-0000062020), not an integer. The site-alarm-triage
+  example declared integers and would have failed on real records; fixed.
+- ClickHouse 26.5 raised "Cannot parse datetime ... __topKFilter" for
+  ORDER BY time_created DESC LIMIT with several selected columns. The repository now
+  sets use_top_k_dynamic_filtering=0 on every query, only when the server lists that
+  setting (older servers reject unknown ones). Regression-tested with a fake client.
+- The alarm table holds 2.84 M rows and its newest event is 2026-06-30: it is a static
+  data set, not a live feed (711 k rows are status 'active'). Evidence now reports
+  observed_age_seconds and warns when the newest record is more than 24 hours old, so
+  a site is not presented as "currently affected" from months-old alarms.
+- 8000 devices, 250 stations; the largest station has 55 devices. Severity values are
+  Major/Minor/Warning/Critical, matching the triage weights.
