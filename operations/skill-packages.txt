@@ -264,3 +264,22 @@ Still needed for the full P2-01 (cannot be done from code alone):
  - maintenance-window data so planned work does not score as an incident;
  - NOC-labelled holdout cases (top impacted sites, known false positives) to
    calibrate the weights; until then the score is a ranking aid only.
+
+Schema discovery (schema_catalog)
+---------------------------------
+Built-in tool schema_catalog(source=all|alarms|inventory, table=optional) returns
+column names and types of allow-listed tables only: ClickHouse system.columns of
+the configured database and PostgreSQL information_schema.columns of the current
+schema. It never reads rows and never accepts query text. Allowlists:
+SCHEMA_DISCOVERY_CLICKHOUSE_TABLES (default "alarm") and
+SCHEMA_DISCOVERY_POSTGRES_TABLES (default "device,station,vendor,error"), i.e. the
+tables the backend templates already read; only plain lowercase table names are
+accepted. A table outside the allowlist is refused before any query
+(TABLE_NOT_ALLOWED); allow-listed tables that do not exist are listed as
+missing_tables; an empty allowlist reports not_configured. Each source is described
+independently: one database down still returns the other's schema, both down is
+CONNECTOR_UNAVAILABLE. Site-restricted principals may use it because it exposes no
+site data. Adding this built-in changes the pinned built-in catalog: finish or
+cancel waiting runs before deploying, as for earlier built-in additions.
+Verified against a real PostgreSQL 16; the ClickHouse query is checked for
+parameter escaping only, not against a live ClickHouse.
