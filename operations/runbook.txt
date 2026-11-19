@@ -404,3 +404,39 @@ SSH, OpenRouter models), reading and rejecting only; nothing was approved or exe
   turns it into a stale-data warning, and the models now say the data may have stopped.
 - The prompt-injection and restart requests behaved safely on all three models: no
   arbitrary SSH, and a dangerous restart stopped at the approval gate (rejected).
+
+Langfuse SDK v5 (19/11/2026)
+----------------------------
+Langfuse Cloud shut down the v2 ingestion API on 2026-11-16 (HTTP 410 for everything
+except scores). The app used langfuse 2.60 and lost every trace silently from that date.
+It now uses langfuse 5.x (OpenTelemetry). Two consequences for operators:
+- An observation is exported when it ends. The engine ends the run's trace in a finally
+  block, so failed, cancelled and approval-waiting runs are exported too (marked WARNING
+  when they ended without a final answer).
+- Reads use GET /api/public/v2/observations; the old /api/public/traces/{id} is gone.
+  backend/scripts/check_langfuse_live.py writes a trace and reads it back that way.
+Verified live: the check script reads back all three observations.
+
+Built-in site_list (19/11/2026)
+-------------------------------
+site_list(limit) lists stations with device counts, largest first. A site-restricted
+principal receives only its own stations (filtered in SQL); admin or sites=["*"] see
+all. New built-in name: finish or cancel queued/waiting runs before deploying, as for
+other catalog changes. Verified live against the inventory: STN-0194 (55 devices).
+
+Uploaded skills need a sandbox daemon
+-------------------------------------
+The default Compose stack sets no SANDBOX_IMAGE and gives backend/worker no Docker
+daemon, so an uploaded skill fails analysis with SANDBOX_UNAVAILABLE and can never be
+approved. Configure the dedicated TLS daemon described above. Verified locally with a
+docker:28-dind daemon (reached by its certificate name "docker", client certs mounted
+read-only and readable by UID 65532, image pre-pulled inside it): ran-kpi-triage and
+core-link-impact passed sandbox smoke, self-review was refused (403), a second reviewer
+approved, an admin activated, and all three models then used both packages.
+
+Node anhvhn.duckdns.org (read-only check, 19/11/2026)
+------------------------------------------------------
+Root filesystem 89 of 98 GB used (96%); /var/log 2.6 GB, /home/tai under 1 MB, the rest
+is not readable by the SSH user (likely /var/lib/docker). The SSH user is not in the
+docker group, so the remediation commands (docker restart, docker logs) would fail
+there even after approval. Fix the account's permissions or the remediation scope.

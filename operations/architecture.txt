@@ -57,7 +57,7 @@ Admin xác minh trạng thái thật trên node rồi mới đối soát (`/reco
 
 | Nhóm | Ví dụ | Ghi chú |
 | --- | --- | --- |
-| Built-in NOC | `noc_alarm_enrichment`, `alarm_statistics`, `device_inventory_lookup`, `node_health_remediate`, `site_capabilities`, `schema_catalog` | Schema tham số chặt; `schema_catalog` chỉ liệt kê bảng/cột trong allowlist, không đọc dòng dữ liệu |
+| Built-in NOC | `noc_alarm_enrichment`, `alarm_statistics`, `device_inventory_lookup`, `node_health_remediate`, `site_list`, `site_inventory`, `site_alarm_overview`, `schema_catalog` | Schema tham số chặt; `schema_catalog` chỉ liệt kê bảng/cột trong allowlist, không đọc dòng dữ liệu |
 | Skill do người dùng | gói `SKILL.md` + `scripts/` + `runtime.json` (hoặc `manifest.json` cũ) | Chạy trong Docker sandbox: không mạng, read-only, non-root, nhận JSON qua stdin |
 | Hướng dẫn skill | `load_skill`, `read_skill_file` | Nạp theo nhu cầu, theo đúng version đã ghim cho run |
 
@@ -83,6 +83,8 @@ quyền privileged và không nhận credential hay kết nối hạ tầng; d�
   `warnings`; câu trả lời cuối được kiểm tra theo `EVIDENCE_ENFORCEMENT=off|warn|strict`.
   Dữ liệu cũ hơn 24 giờ được cảnh báo thay vì trình bày như đang xảy ra.
 - **Redaction** áp dụng cho log, event và input/output hiển thị.
+- **Tracing**: Langfuse SDK v5 (OpenTelemetry). Mỗi run là một trace; engine luôn đóng trace
+  trong `finally` nên run lỗi hoặc bị hủy vẫn được ghi.
 
 ## 5. Dữ liệu và cấu hình
 
