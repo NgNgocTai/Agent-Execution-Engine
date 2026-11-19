@@ -446,3 +446,25 @@ disabled snap revisions removed, system journal vacuumed to 1 GB; disk 96% -> 94
 remaining space belongs to other users of this shared host (about 40 GB of
 phihung18112005/everest images with 20+ old predictor tags, /var/snap/lxd 22 GB, home
 directories); it was left untouched and needs the owners or the host admin to prune.
+
+Decisions of 19/11/2026
+-----------------------
+backend/noc_agent.dump (removed from the tree, still in history at 82fde3a): its data
+was decoded with pg_restore and scanned. It holds only test conversations, messages and
+approvals (June 2026): no API keys, bearer tokens, private keys or real passwords (one
+8-character Grafana adminPassword inside an LLM-written Helm example). The hosts in it
+(anhvhn.duckdns.org, 117.0.142.139, 10.x fixture addresses) already appear in tracked
+eval datasets. Decision: history is NOT rewritten; no force-push.
+
+LLM_CONTEXT_TOKENS: the 32768 default overflowed DeepSeek on a 50-alarm site overview
+(CONTEXT_BUDGET_EXCEEDED). The live .env now sets 65536; all three configured models
+accept 128k or more, so the same scenario succeeded on rerun. Keep the code default for
+small local models; raise it per deployment.
+
+Not built, on purpose: SSO (bearer principals with roles and site scope are already
+stricter than the reference project, which has none; put an OIDC proxy in front when an
+IdP exists), @resource references (no reference implementation, no agreed design), and
+cutting into a tool batch that is still running (interventions apply after the current
+batch, as in the reference project, so a batch is never half-executed). Live KPI, link
+and topology connectors wait for a real data source; the two packages take
+operator-supplied records until then.
