@@ -440,3 +440,9 @@ Root filesystem 89 of 98 GB used (96%); /var/log 2.6 GB, /home/tai under 1 MB, t
 is not readable by the SSH user (likely /var/lib/docker). The SSH user is not in the
 docker group, so the remediation commands (docker restart, docker logs) would fail
 there even after approval. Fix the account's permissions or the remediation scope.
+Update the same day: the SSH user was added to the docker group (five other users already
+were), so docker restart/logs work for remediation. Housekeeping only: apt cache cleaned,
+disabled snap revisions removed, system journal vacuumed to 1 GB; disk 96% -> 94%. The
+remaining space belongs to other users of this shared host (about 40 GB of
+phihung18112005/everest images with 20+ old predictor tags, /var/snap/lxd 22 GB, home
+directories); it was left untouched and needs the owners or the host admin to prune.
