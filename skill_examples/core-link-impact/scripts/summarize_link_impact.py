@@ -15,6 +15,7 @@ LIST_LIMIT = 10
 LATENCY_HIGH = 100.0
 LOSS_HIGH = 2.0
 THROUGHPUT_LOW = 100.0
+OUTAGE_FLOOR = 45.0  # a reported 0 Mbps is at least "medium"
 
 
 def severity(value):
@@ -58,6 +59,10 @@ def score_group(group):
     if group["throughput"] is not None and group["throughput"] < THROUGHPUT_LOW:
         score += min((THROUGHPUT_LOW - group["throughput"]) / 4, 20)
         drivers.append(f"low throughput {group['throughput']:.1f} Mbps")
+    if group["throughput"] == 0:
+        # A link carrying nothing is a failure signal, never "low".
+        score = max(score, OUTAGE_FLOOR)
+        drivers.append("zero throughput: possible link failure, impact floor applied")
     return round(min(score, 100.0), 1), drivers
 
 

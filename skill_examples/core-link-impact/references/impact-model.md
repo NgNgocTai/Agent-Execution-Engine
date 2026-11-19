@@ -11,7 +11,8 @@ Records are grouped by `link_id`. Per link:
 - Highest packet loss 2% or more: value x 8, max 35.
 - Lowest throughput below 100 Mbps (0 counts): (100 - value) / 4, max 20.
 
-Score is capped at 100. Levels: high >= 80, medium >= 45, low > 0, none_observed = score 0
+A lowest throughput of exactly 0 Mbps raises the score to at least 45 (medium): a link carrying
+nothing is a failure signal. Score is capped at 100. Levels: high >= 80, medium >= 45, low > 0, none_observed = score 0
 with usable evidence, insufficient_data = no recognised severity and no KPI.
 
 Unlike the sample-data tools it was modelled on, this skill never substitutes built-in

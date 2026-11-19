@@ -13,7 +13,8 @@ in the cell's drivers. Contributions (each capped):
 | affected_subscribers | 500 or more | value / 45, max 25 |
 | alarm_count | 3 or more | value x 3, max 18 |
 
-Score is capped at 100. Severity: critical >= 80, major >= 50, minor >= 25, else normal.
+A reported throughput of exactly 0 Mbps raises the score to at least 50 (major): no traffic is an
+outage signal, not a mild anomaly. Score is capped at 100. Severity: critical >= 80, major >= 50, minor >= 25, else normal.
 A cell with none of the six KPIs is `insufficient_data` with score 0.
 
 `top_site_by_total_score` sums the scores of a site's cells, so a site with many mildly

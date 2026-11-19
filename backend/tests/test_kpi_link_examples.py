@@ -115,8 +115,11 @@ class RanTriageTest(unittest.TestCase):
 
     def test_zero_throughput_is_scored_as_the_severe_reading_it_is(self):
         zero = ran([{"cell_id": "Z", "throughput_mbps": 0}])["ranked_cells"][0]
-        self.assertEqual(zero["score"], 22.0)
+        self.assertEqual((zero["score"], zero["severity"]), (50.0, "major"))
         self.assertIn("throughput low: 0.0 Mbps", zero["drivers"])
+        self.assertTrue(any("possible outage" in d for d in zero["drivers"]))
+        low = ran([{"cell_id": "L", "throughput_mbps": 1}])["ranked_cells"][0]
+        self.assertEqual((low["score"], low["severity"]), (22.0, "normal"))  # capped, and the floor is for 0 only
 
     def test_no_samples_are_substituted_when_records_are_missing(self):
         with self.assertRaises(KeyError):
@@ -173,7 +176,10 @@ class LinkImpactTest(unittest.TestCase):
 
     def test_zero_throughput_is_scored(self):
         item = link([alarm("L1", "normal", throughput_mbps=0)])["impacts"][0]
-        self.assertEqual(item["impact_score"], 20.0)
+        self.assertEqual((item["impact_score"], item["impact_level"]), (45.0, "medium"))
+        self.assertTrue(any("possible link failure" in d for d in item["drivers"]))
+        slow = link([alarm("L1", "normal", throughput_mbps=1)])["impacts"][0]
+        self.assertEqual((slow["impact_score"], slow["impact_level"]), (20.0, "low"))
 
     def test_missing_sites_and_services_are_lower_bounds_not_counted_as_unknown_sites(self):
         out = link([alarm("L1", "major"), alarm("L1", "major")])

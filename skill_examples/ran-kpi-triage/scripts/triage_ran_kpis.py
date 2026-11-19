@@ -16,6 +16,7 @@ LATENCY_MAJOR = 100.0
 PACKET_LOSS_MAJOR = 2.0
 THROUGHPUT_LOW = 25.0
 SUBSCRIBERS_MAJOR = 500
+OUTAGE_FLOOR = 50.0  # a reported 0 Mbps is at least "major"
 MAX_CELLS_OUT = 50
 SEVERITIES = ("critical", "major", "minor", "normal", "insufficient_data")
 
@@ -77,6 +78,10 @@ def analyze(record):
         drivers = ["No KPI value was reported for this cell"]
         actions = ["Obtain KPI values for this cell before drawing any conclusion."]
     else:
+        if record.get("throughput_mbps") == 0:
+            # No user-plane traffic at all is an outage signal, never "normal".
+            score = max(score, OUTAGE_FLOOR)
+            drivers.append("zero throughput: possible outage, severity floor applied")
         score = round(min(score, 100.0), 1)
         severity = classify(score)
         if not drivers:
