@@ -9,7 +9,7 @@ pydantic>=2.7.0,<3.0.0
 pydantic-settings>=2.3.0,<3.0.0
 
 # Observability
-langfuse>=2.30.0,<3.0.0
+langfuse>=5.2.0,<6.0.0
 
 # SSH
 paramiko>=3.4.0,<4.0.0

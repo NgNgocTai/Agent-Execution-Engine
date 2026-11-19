@@ -50,7 +50,22 @@ class AgentEngine:
         # other tool is used in the run.
         self.required_skill = required_skill
 
-    async def run(
+    async def run(self, *args, **kwargs) -> AsyncGenerator[AgentEvent, None]:
+        """Run the agent; the run's trace is always closed, even on error or cancellation.
+
+        Tracing exports an observation only when it ends, so a run that raises, is
+        cancelled or returns early without finalizing would otherwise leave no trace.
+        """
+        holder: dict = {}
+        try:
+            async for event in self._run(*args, trace_holder=holder, **kwargs):
+                yield event
+        finally:
+            trace_ctx = holder.get("trace")
+            if trace_ctx is not None:
+                trace_ctx.close()
+
+    async def _run(
         self,
         session_id: str,
         user_message: str,
@@ -60,6 +75,7 @@ class AgentEngine:
         resume: bool = False,
         checkpoint: dict | None = None,
         save_checkpoint=None,
+        trace_holder: dict | None = None,
     ) -> AsyncGenerator[AgentEvent, None]:
         start_time = time.monotonic()
         total_tool_calls = 0
@@ -110,6 +126,8 @@ class AgentEngine:
             if self.tracer
             else None
         )
+        if trace_holder is not None:
+            trace_holder["trace"] = trace_ctx
 
         while iteration < MAX_ITERATIONS or resumed_calls:
             require("operator")

@@ -5,16 +5,17 @@ import base64
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
-from langfuse import Langfuse
+from langfuse import Langfuse, propagate_attributes
 
 from core.config import settings
 
@@ -31,22 +32,26 @@ def _auth_header(public_key: str, secret_key: str) -> str:
     return f"Basic {token}"
 
 
-def _get_trace(host: str, public_key: str, secret_key: str, trace_id: str) -> tuple[int, str]:
-    url = f"{host.rstrip('/')}/api/public/traces/{trace_id}"
+def _find_observations(host: str, public_key: str, secret_key: str, trace_id: str, since: datetime) -> tuple[int, list | str]:
+    """Read back through the v2 observations API (the v1 trace endpoint was removed)."""
+    until = datetime.now(timezone.utc) + timedelta(minutes=1)
+    query = urlencode({
+        "fields": "core,basic",
+        "fromStartTime": since.isoformat().replace("+00:00", "Z"),
+        "toStartTime": until.isoformat().replace("+00:00", "Z"),
+        "limit": 100,
+    })
     req = Request(
-        url,
-        headers={
-            "Authorization": _auth_header(public_key, secret_key),
-            "Accept": "application/json",
-        },
+        f"{host.rstrip('/')}/api/public/v2/observations?{query}",
+        headers={"Authorization": _auth_header(public_key, secret_key), "Accept": "application/json"},
         method="GET",
     )
     try:
-        with urlopen(req, timeout=10) as resp:
-            return resp.status, resp.read().decode("utf-8", errors="replace")
+        with urlopen(req, timeout=15) as resp:
+            rows = json.loads(resp.read().decode("utf-8")).get("data", [])
+            return resp.status, [row for row in rows if row.get("traceId") == trace_id]
     except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return exc.code, body
+        return exc.code, exc.read().decode("utf-8", errors="replace")
     except URLError as exc:
         raise RuntimeError(f"Không kết nối được Langfuse API: {exc}") from exc
 
@@ -60,90 +65,64 @@ def run_live_check(wait_seconds: int, poll_interval: float) -> int:
         print("FAIL: thiếu LANGFUSE_PUBLIC_KEY hoặc LANGFUSE_SECRET_KEY.")
         return 2
 
-    trace_id = f"codex-live-check-{uuid4().hex}"
-    session_id = f"codex-live-check-session-{uuid4().hex}"
-    now = datetime.now(timezone.utc).isoformat()
+    since = datetime.now(timezone.utc) - timedelta(minutes=1)
+    session_id = f"live-check-session-{uuid4().hex}"
+    client = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
+    trace_id = client.create_trace_id()
 
     print("Creating Langfuse live-check trace...")
     print(f"Host: {host}")
     print(f"Trace ID: {trace_id}")
     print(f"Session ID: {session_id}")
 
-    client = Langfuse(
-        public_key=public_key,
-        secret_key=secret_key,
-        host=host,
-    )
-
-    trace = client.trace(
-        id=trace_id,
-        name="codex-langfuse-live-check",
-        session_id=session_id,
-        input={"message": "Langfuse live check from backend script"},
-        metadata={
-            "source": "backend/scripts/check_langfuse_live.py",
-            "created_at": now,
-        },
-    )
-    generation = trace.generation(
-        name="live-check-generation",
-        model="codex-live-check",
-        input=[{"role": "user", "content": "ping"}],
-        metadata={"live_check": True},
-    )
-    generation.end(
-        output="pong",
-        usage_details={"input": 1, "output": 1},
-        metadata={"status": "ok"},
-    )
-    span = trace.span(
-        name="tool-live-check",
-        input={"tool": "noop"},
-        metadata={"live_check": True},
-    )
-    span.end(output={"status": "success", "result": "noop"})
-    trace.update(
-        output="Langfuse live check completed",
-        metadata={"live_check_completed": True},
-    )
+    with propagate_attributes(session_id=session_id, trace_name="langfuse-live-check"):
+        root = client.start_observation(
+            trace_context={"trace_id": trace_id},
+            name="langfuse-live-check",
+            as_type="agent",
+            input={"message": "Langfuse live check from backend script"},
+            metadata={"source": "backend/scripts/check_langfuse_live.py"},
+        )
+        generation = root.start_observation(
+            name="live-check-generation", as_type="generation", model="live-check",
+            input=[{"role": "user", "content": "ping"}],
+        )
+        generation.update(output="pong", usage_details={"input": 1, "output": 1})
+        generation.end()
+        tool = root.start_observation(name="tool-live-check", as_type="tool", input={"tool": "noop"})
+        tool.update(output={"status": "success"})
+        tool.end()
+    root.update(output="Langfuse live check completed")
+    root.end()
     client.flush()
 
     deadline = time.monotonic() + wait_seconds
-    last_status = None
-    last_body = ""
-
+    last_status, last_body = None, ""
     while time.monotonic() <= deadline:
-        status, body = _get_trace(host, public_key, secret_key, trace_id)
-        last_status = status
-        last_body = body
-
-        if status == 200:
-            payload = json.loads(body)
-            print("PASS: Langfuse trace đã được tạo và đọc lại qua API.")
-            print(f"Trace name: {payload.get('name')}")
-            print(f"Verified trace ID: {trace_id}")
-            return 0
-
+        status, found = _find_observations(host, public_key, secret_key, trace_id, since)
+        last_status, last_body = status, found
         if status in (401, 403):
             print("FAIL: Langfuse API từ chối credentials (401/403).")
             return 3
-
-        if status != 404:
+        if status != 200:
             print(f"FAIL: Langfuse API trả status {status}.")
-            print(body[:500])
+            print(str(found)[:500])
             return 4
-
+        names = sorted(row.get("name") for row in found)
+        if len(found) >= 3:
+            print("PASS: trace đã được ghi và đọc lại qua API v2.")
+            print(f"Observations: {names}")
+            return 0
         time.sleep(poll_interval)
 
-    print("FAIL: đã flush nhưng chưa đọc lại được trace trước timeout.")
-    print(f"Last status: {last_status}")
-    print(last_body[:500])
+    print("FAIL: đã flush nhưng chưa đọc lại đủ observation trước timeout.")
+    print(f"Last status: {last_status}; found: {str(last_body)[:300]}")
     return 5
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create and verify a Langfuse live-check trace.")
-    parser.add_argument("--wait-seconds", type=int, default=30)
+    parser.add_argument("--wait-seconds", type=int, default=90)
     parser.add_argument("--poll-interval", type=float, default=2.0)
     args = parser.parse_args()
     return run_live_check(args.wait_seconds, args.poll_interval)

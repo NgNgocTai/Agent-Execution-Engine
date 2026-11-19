@@ -1,10 +1,18 @@
 """
-Langfuse Tracer - Camera giám sát bên trong não Agent.
+Langfuse tracing for agent runs (Langfuse Python SDK v5, OpenTelemetry based).
 
-Ghi lại toàn bộ quá trình Agent hoạt động:
-- LLM Calls: model, tokens, thời gian
-- Tool Calls: tên tool, tham số, kết quả, thời gian
-- Tổng kết: tổng thời gian, tổng tool calls
+One run is one trace: a root "agent-run" observation with a generation per LLM call and a
+tool observation per tool call. The v2 ingestion API this module used to call was shut down
+on Langfuse Cloud on 2026-11-16 and rejected every event silently, so this is written
+against the current SDK.
+
+Two rules of the OpenTelemetry model matter here:
+- An observation is exported only when it ends. `TraceContext.close()` therefore ends
+  whatever is still open, so runs that fail, are cancelled or wait for approval are traced
+  too (the engine calls it from a `finally`).
+- Trace-level attributes (session id, trace name, metadata) are propagated to each
+  observation when it starts, so every observation is created inside
+  `propagate_attributes`.
 """
 
 from __future__ import annotations
@@ -14,7 +22,6 @@ import time
 from enum import Enum
 from typing import Any
 
-from langfuse import Langfuse
 from pydantic import BaseModel
 
 from core.config import settings
@@ -22,6 +29,8 @@ from core.redaction import redact
 from core.request_context import request_id, run_id, step_identifier
 
 logger = logging.getLogger(__name__)
+
+MAX_ATTRIBUTE_CHARS = 200  # Langfuse drops propagated string values longer than this
 
 
 def _json_safe(value: Any) -> Any:
@@ -39,57 +48,73 @@ def _json_safe(value: Any) -> Any:
     return redact(str(value))
 
 
+def _attribute(value: Any) -> str:
+    return str(redact(str(value)))[:MAX_ATTRIBUTE_CHARS]
+
+
 class LangfuseTracer:
-    """Wrapper quanh Langfuse SDK, cung cấp API đơn giản cho AgentEngine."""
+    """Thin wrapper around the Langfuse client with the API the AgentEngine uses."""
 
-    def __init__(self) -> None:
-        self._enabled = bool(
-            settings.langfuse_public_key and settings.langfuse_secret_key
-        )
-        self._client: Langfuse | None = None
-
-        if self._enabled:
-            try:
-                self._client = Langfuse(
-                    public_key=settings.langfuse_public_key,
-                    secret_key=settings.langfuse_secret_key,
-                    host=settings.langfuse_host,
-                )
-                logger.info("Langfuse tracing enabled (host=%s)", settings.langfuse_host)
-            except Exception as e:
-                logger.warning("Langfuse init failed, tracing disabled: %s", e)
-                self._enabled = False
-        else:
+    def __init__(self, client: Any = None, propagate: Any = None) -> None:
+        self._client = client
+        self._propagate = propagate
+        self._enabled = client is not None
+        if client is not None:
+            return
+        if not (settings.langfuse_public_key and settings.langfuse_secret_key):
             logger.info("Langfuse tracing disabled (no keys configured)")
+            return
+        try:
+            from langfuse import Langfuse, propagate_attributes
+
+            self._client = Langfuse(
+                public_key=settings.langfuse_public_key,
+                secret_key=settings.langfuse_secret_key,
+                host=settings.langfuse_host,
+            )
+            self._propagate = propagate_attributes
+            self._enabled = True
+            logger.info("Langfuse tracing enabled (host=%s)", settings.langfuse_host)
+        except Exception as e:
+            logger.warning("Langfuse init failed, tracing disabled: %s", e)
+            self._client, self._enabled = None, False
 
     @property
     def enabled(self) -> bool:
         return self._enabled
 
-    def create_trace(
-        self,
-        session_id: str,
-        user_message: str,
-        provider_name: str,
-    ) -> TraceContext:
-        """Tạo một Trace mới cho mỗi lần user gửi câu hỏi."""
+    def create_trace(self, session_id: str, user_message: str, provider_name: str) -> TraceContext:
+        """One trace per run (or per resumed run segment)."""
         if not self._enabled or not self._client:
             return TraceContext(trace=None, enabled=False)
-
-        try:
-            trace = self._client.trace(
-                name="agent-run",
-                session_id=session_id,
-                input=_json_safe({"user_message": user_message}),
-                metadata={"provider": provider_name, "request_id": request_id.get(), "run_id": run_id.get(), "conversation_id": session_id},
-            )
-        except Exception:
-            logger.warning("Telemetry enqueue failed")
+        attributes = {
+            "session_id": _attribute(session_id),
+            "trace_name": "agent-run",
+            "metadata": {
+                key: _attribute(value)
+                for key, value in {
+                    "provider": provider_name,
+                    "request_id": request_id.get(),
+                    "run_id": run_id.get(),
+                    "conversation_id": session_id,
+                }.items()
+                if value
+            },
+        }
+        context = TraceContext(trace=None, enabled=True, propagate=self._propagate, attributes=attributes)
+        root = context.observe(
+            self._client.start_observation,
+            name="agent-run",
+            as_type="agent",
+            input=_json_safe({"user_message": user_message}),
+            metadata={"provider": provider_name},
+        )
+        if root is None:
             return TraceContext(trace=None, enabled=False)
-        return TraceContext(trace=trace, enabled=True)
+        context._trace = root
+        return context
 
     def flush(self) -> None:
-        """Đẩy toàn bộ buffer lên Langfuse cloud."""
         if self._client:
             try:
                 self._client.flush()
@@ -98,15 +123,45 @@ class LangfuseTracer:
 
     def close(self):
         if self._client:
-            self._client.shutdown()
+            try:
+                self._client.shutdown()
+            except Exception as e:
+                logger.warning("Langfuse shutdown error: %s", e)
 
 
 class TraceContext:
-    """Context cho một lần chạy Agent, quản lý các Span con."""
+    """The observations of one run. Every method is best effort and never raises."""
 
-    def __init__(self, trace: Any, enabled: bool) -> None:
+    def __init__(self, trace: Any, enabled: bool, propagate: Any = None, attributes: dict | None = None) -> None:
         self._trace = trace
         self._enabled = enabled
+        self._propagate = propagate
+        self._attributes = attributes or {}
+        self._open: list[Any] = []
+        self._finalized = False
+
+    def observe(self, start, **kwargs):
+        """Start an observation with the trace attributes propagated onto it."""
+        try:
+            if self._propagate is not None:
+                with self._propagate(**self._attributes):
+                    return start(**kwargs)
+            return start(**kwargs)
+        except Exception:
+            logger.warning("Telemetry enqueue failed")
+            return None
+
+    def _child(self, **kwargs):
+        if not self._enabled or not self._trace or self._finalized:
+            return None
+        observation = self.observe(self._trace.start_observation, **kwargs)
+        if observation is not None:
+            self._open.append(observation)
+        return observation
+
+    def _closed(self, observation) -> None:
+        if observation in self._open:
+            self._open.remove(observation)
 
     def start_llm_generation(
         self,
@@ -115,25 +170,18 @@ class TraceContext:
         messages: list[dict],
         tools: list[dict] | None = None,
     ) -> GenerationContext:
-        """Ghi nhận bắt đầu một lần gọi LLM."""
-        if not self._enabled or not self._trace:
-            return GenerationContext(generation=None, enabled=False)
-
-        try:
-            generation = self._trace.generation(
-                name=f"llm-call-iter-{iteration}",
-                model=model,
-                input=_json_safe(messages),
-                metadata={
-                    "tools_count": len(tools) if tools else 0,
-                    "tools": _json_safe(tools or []),
+        generation = self._child(
+            name=f"llm-call-iter-{iteration}",
+            as_type="generation",
+            model=model,
+            input=_json_safe(messages),
+            metadata={
+                "tools_count": len(tools) if tools else 0,
+                "tools": _json_safe(tools or []),
                 "step_id": step_identifier(run_id.get(), f"llm:{iteration}"),
-                },
-            )
-        except Exception:
-            logger.warning("Telemetry enqueue failed")
-            return GenerationContext(generation=None, enabled=False)
-        return GenerationContext(generation=generation, enabled=True)
+            },
+        )
+        return GenerationContext(generation=generation, enabled=generation is not None, on_end=self._closed)
 
     def start_tool_span(
         self,
@@ -142,51 +190,70 @@ class TraceContext:
         iteration: int,
         call_id: str | None = None,
     ) -> SpanContext:
-        """Ghi nhận bắt đầu một lần gọi Tool."""
-        if not self._enabled or not self._trace:
-            return SpanContext(span=None, enabled=False)
+        span = self._child(
+            name=f"tool-{tool_name}",
+            as_type="tool",
+            input=_json_safe(arguments),
+            metadata={
+                "iteration": iteration,
+                "step_id": step_identifier(run_id.get(), "tool:" + call_id) if call_id else None,
+                "execution_id": step_identifier(run_id.get(), "execution:" + call_id) if call_id else None,
+            },
+        )
+        return SpanContext(span=span, enabled=span is not None, on_end=self._closed)
 
-        try:
-            span = self._trace.span(
-                name=f"tool-{tool_name}",
-                input=_json_safe(arguments),
-                metadata={"iteration": iteration,
-                    "step_id": step_identifier(run_id.get(), "tool:" + call_id) if call_id else None,
-                    "execution_id": step_identifier(run_id.get(), "execution:" + call_id) if call_id else None},
-            )
-        except Exception:
-            logger.warning("Telemetry enqueue failed")
-            return SpanContext(span=None, enabled=False)
-        return SpanContext(span=span, enabled=True)
-
-    def finalize(
-        self,
-        total_tool_calls: int,
-        total_duration_ms: float,
-        output: str | None = None,
-    ) -> None:
-        """Cập nhật Trace với thông tin tổng kết."""
-        if not self._enabled or not self._trace:
+    def finalize(self, total_tool_calls: int, total_duration_ms: float, output: str | None = None) -> None:
+        """Record the run summary and end the trace. Later calls are ignored."""
+        if not self._enabled or not self._trace or self._finalized:
             return
-
+        self._end_open_children("Ended with the run before it completed")
         try:
             self._trace.update(
                 output=_json_safe(output or "completed"),
-                metadata={
-                    "total_tool_calls": total_tool_calls,
-                    "total_duration_ms": round(total_duration_ms, 2),
-                },
+                metadata={"total_tool_calls": total_tool_calls, "total_duration_ms": round(total_duration_ms, 2)},
             )
         except Exception as e:
             logger.warning("Langfuse trace finalize error: %s", e)
+        self._end_root()
+
+    def close(self) -> None:
+        """End anything still open: a run that failed, was cancelled or stopped mid-way."""
+        if not self._enabled or not self._trace or self._finalized:
+            return
+        self._end_open_children("Run stopped before this step completed")
+        try:
+            self._trace.update(
+                level="WARNING",
+                status_message="Run ended without a final answer (error, cancellation or worker stop)",
+            )
+        except Exception as e:
+            logger.warning("Langfuse trace close error: %s", e)
+        self._end_root()
+
+    def _end_open_children(self, message: str) -> None:
+        for observation in list(self._open):
+            try:
+                observation.update(level="WARNING", status_message=message)
+                observation.end()
+            except Exception as e:
+                logger.warning("Langfuse observation close error: %s", e)
+            self._closed(observation)
+
+    def _end_root(self) -> None:
+        self._finalized = True
+        try:
+            self._trace.end()
+        except Exception as e:
+            logger.warning("Langfuse trace end error: %s", e)
 
 
 class GenerationContext:
-    """Context cho một lần gọi LLM."""
+    """One LLM call."""
 
-    def __init__(self, generation: Any, enabled: bool) -> None:
+    def __init__(self, generation: Any, enabled: bool, on_end=None) -> None:
         self._generation = generation
         self._enabled = enabled
+        self._on_end = on_end
         self._start_time = time.monotonic()
 
     def end(
@@ -197,56 +264,46 @@ class GenerationContext:
         thinking_content: str | None = None,
         provider_error: dict | None = None,
     ) -> None:
-        """Kết thúc Generation, ghi output và usage."""
         if not self._enabled or not self._generation:
             return
-
         try:
             end_data: dict[str, Any] = {}
-
-            metadata: dict[str, Any] = {}
-
-            if thinking_content:
-                metadata["thinking_present"] = True
-                metadata["thinking_chars"] = len(thinking_content)
-                if settings.langfuse_trace_thinking_content:
-                    metadata["thinking_content"] = thinking_content
-            else:
-                metadata["thinking_present"] = False
-                metadata["thinking_chars"] = 0
-
+            metadata: dict[str, Any] = {
+                "thinking_present": bool(thinking_content),
+                "thinking_chars": len(thinking_content) if thinking_content else 0,
+            }
+            if thinking_content and settings.langfuse_trace_thinking_content:
+                metadata["thinking_content"] = thinking_content
             if provider_error:
                 metadata["provider_error"] = provider_error
                 end_data["level"] = "ERROR"
                 end_data["status_message"] = provider_error.get("message", "Provider error")
-
-            # Ghi nhận đầy đủ: nếu có cả text VÀ tool_calls thì giữ nguyên cả 2
             if output and tool_calls:
-                end_data["output"] = {
-                    "text": output,
-                    "tool_calls": tool_calls,
-                }
+                end_data["output"] = {"text": output, "tool_calls": tool_calls}
             elif tool_calls:
                 end_data["output"] = {"tool_calls": tool_calls}
             elif output:
                 end_data["output"] = output
-
             if usage:
                 end_data["usage_details"] = usage
-
             end_data["metadata"] = _json_safe(metadata)
-
-            self._generation.end(**_json_safe(end_data))
+            self._generation.update(**_json_safe(end_data))
+            self._generation.end()
         except Exception as e:
             logger.warning("Langfuse generation end error: %s", e)
+        finally:
+            self._enabled = False
+            if self._on_end:
+                self._on_end(self._generation)
 
 
 class SpanContext:
-    """Context cho một lần gọi Tool."""
+    """One tool call."""
 
-    def __init__(self, span: Any, enabled: bool) -> None:
+    def __init__(self, span: Any, enabled: bool, on_end=None) -> None:
         self._span = span
         self._enabled = enabled
+        self._on_end = on_end
 
     def end(
         self,
@@ -255,19 +312,20 @@ class SpanContext:
         error: str | None = None,
         execution_time_ms: float | None = None,
     ) -> None:
-        """Kết thúc Span, ghi kết quả Tool."""
         if not self._enabled or not self._span:
             return
-
         try:
-            output_data = {
-                "status": status,
-                "result": _json_safe(result),
-                "error": error,
-            }
+            output_data = {"status": status, "result": _json_safe(result), "error": error}
             if execution_time_ms is not None:
                 output_data["execution_time_ms"] = round(execution_time_ms, 2)
-
-            self._span.end(output=_json_safe(output_data))
+            update = {"output": _json_safe(output_data)}
+            if status != "success":
+                update["level"] = "WARNING"
+            self._span.update(**update)
+            self._span.end()
         except Exception as e:
             logger.warning("Langfuse span end error: %s", e)
+        finally:
+            self._enabled = False
+            if self._on_end:
+                self._on_end(self._span)
