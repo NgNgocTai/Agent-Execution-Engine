@@ -46,7 +46,7 @@ def plan(tool_name, arguments, brokered=False):
         return Decision.DENY
     from services.skill_guides import GUIDE_TOOLS
 
-    if brokered or tool_name in {"site_inventory", "site_alarm_overview"}:
+    if brokered or tool_name in {"site_inventory", "site_alarm_overview", "site_list"}:
         # Row scope is enforced inside the capability (before any query), so
         # site-restricted principals may call it for their own sites only.
         return Decision.ALLOW

@@ -42,6 +42,27 @@ class DeviceRepository:
         )
         return [dict(row) for row in rows]
 
+    async def list_stations(self, limit: int, only: list[str] | None = None) -> tuple[list[dict], int]:
+        """Stations with device counts, largest first.
+
+        `only` (lower-case station ids or names) restricts rows in SQL, so a
+        site-scoped principal never receives other stations; None means all.
+        """
+        scope = "" if only is None else "WHERE lower(s.station_id) = ANY($2::text[]) OR lower(s.name) = ANY($2::text[]) "
+        args = (limit,) if only is None else (limit, only)
+        rows = await self._pool.fetch(
+            "SELECT s.station_id, s.name, count(d.device_id) AS device_count FROM station s "
+            "LEFT JOIN device d ON d.station_id = s.station_id " + scope
+            + "GROUP BY s.station_id, s.name ORDER BY device_count DESC, s.station_id LIMIT $1",
+            *args,
+        )
+        total = await self._pool.fetchval(
+            "SELECT count(*) FROM station s "
+            + ("" if only is None else "WHERE lower(s.station_id) = ANY($1::text[]) OR lower(s.name) = ANY($1::text[])"),
+            *(() if only is None else (only,)),
+        )
+        return [dict(row) for row in rows], int(total)
+
     async def list_station_devices(self, station_id: str, limit: int) -> list[dict]:
         rows = await self._pool.fetch(
             "SELECT d.device_id, d.name, d.device_type, d.ip_address, "

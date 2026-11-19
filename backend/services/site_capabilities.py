@@ -80,6 +80,35 @@ def _provenance(*sources):
     }
 
 
+MAX_SITES = 100
+
+
+async def site_list(hub, limit=20, actor=None):
+    """Sites the actor may read, with device counts, largest first."""
+    actor = actor or principal()
+    limit = max(1, min(int(limit), MAX_SITES))
+    unrestricted = "admin" in actor.roles or "*" in actor.sites
+    only = None if unrestricted else sorted(str(site).lower() for site in actor.sites)
+    result = {"scope": "all_sites" if unrestricted else "authorized_sites", "order": "device_count_desc"}
+    if only == []:
+        return {**result, "sites": [], "listed": 0, "site_count_total": 0, "truncated": False,
+                "data_status": "no_authorized_sites", "provenance": _provenance("inventory")}
+    rows, total = await hub.devices.list_stations(limit, only)
+    sites = [
+        {"station_id": row["station_id"], "name": row["name"], "device_count": int(row["device_count"])}
+        for row in rows
+    ]
+    return {
+        **result,
+        "sites": sites,
+        "listed": len(sites),
+        "site_count_total": total,
+        "truncated": total > len(sites),
+        "data_status": "ok" if sites else "no_sites",
+        "provenance": _provenance("inventory"),
+    }
+
+
 async def site_inventory(hub, key, limit=200, actor=None):
     actor = actor or principal()
     station = await resolve_site(hub.devices, key, actor)

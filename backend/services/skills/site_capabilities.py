@@ -6,9 +6,10 @@ from services.site_capabilities import (
     SiteError,
     site_alarms,
     site_inventory,
+    site_list,
 )
 from services.skills.base import BaseSkill, SkillResult, SkillStatus
-from services.skills.input_models import SiteInput
+from services.skills.input_models import SiteInput, SiteListInput
 
 
 def site_failure(exc: SiteError):
@@ -76,3 +77,29 @@ class SiteAlarmOverviewSkill(BaseSkill):
         except SiteError as exc:
             return site_failure(exc)
         return SkillResult(status=SkillStatus.SUCCESS, data=data)
+
+
+class SiteListSkill(BaseSkill):
+    input_model = SiteListInput
+
+    def __init__(self, hub) -> None:
+        self.hub = hub
+
+    @property
+    def name(self) -> str:
+        return "site_list"
+
+    @property
+    def description(self) -> str:
+        return (
+            "List sites (stations) with their device counts, largest first. Use it to "
+            "find which sites exist or which has the most devices, then pass a station id "
+            "to site_inventory or site_alarm_overview. Limited to authorized sites."
+        )
+
+    @property
+    def parameters_schema(self) -> dict:
+        return SiteListInput.model_json_schema()
+
+    async def execute(self, limit: int = 20, **kwargs) -> SkillResult:
+        return SkillResult(status=SkillStatus.SUCCESS, data=await site_list(self.hub, limit))

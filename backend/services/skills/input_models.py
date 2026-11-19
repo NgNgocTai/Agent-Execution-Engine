@@ -38,6 +38,10 @@ class InventoryInput(SkillInput):
         return self
 
 
+class SiteListInput(SkillInput):
+    limit: int = Field(default=20, ge=1, le=100)
+
+
 class SiteInput(SkillInput):
     site: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9 _.:-]*$")
     limit: int = Field(default=50, ge=1, le=100)

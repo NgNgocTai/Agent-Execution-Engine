@@ -104,6 +104,7 @@ class IsolationTest(unittest.IsolatedAsyncioTestCase):
                 "noc_alarm_enrichment",
                 "alarm_statistics",
                 "device_inventory_lookup",
+                "site_list",
                 "site_inventory",
                 "site_alarm_overview",
                 "schema_catalog",

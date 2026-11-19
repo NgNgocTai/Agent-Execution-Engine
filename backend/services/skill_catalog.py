@@ -22,6 +22,7 @@ BUILTIN_SKILL_NAMES = (
     "site_inventory",
     "site_alarm_overview",
     "schema_catalog",
+    "site_list",
 )
 SHORT_DESCRIPTION = 600
 
@@ -70,6 +71,7 @@ def builtin_manifest(skill):
             "device_inventory_lookup": ["inventory", "alarms"],
             "noc_alarm_enrichment": ["alarms", "inventory"],
             "site_inventory": ["inventory"],
+            "site_list": ["inventory"],
             "site_alarm_overview": ["alarms", "inventory"],
             "schema_catalog": ["alarms", "inventory"],
         }.get(skill.name, []),
